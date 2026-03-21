@@ -1,0 +1,63 @@
+name: backend-ci
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "docker-compose.test.yml"
+      - "Makefile"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "docker-compose.test.yml"
+      - "Makefile"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pip install poetry==2.3.2
+
+      - name: Install Backend Dependencies
+        run: make backend-install
+
+      - name: Lint Backend
+        run: make backend-lint
+
+      - name: Run Unit Tests
+        run: make backend-test-unit
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: lint-and-unit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pip install poetry==2.3.2
+
+      - name: Install Backend Dependencies
+        run: make backend-install
+
+      - name: Run Integration Tests
+        run: make backend-test-integration

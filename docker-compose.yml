@@ -1,0 +1,116 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_STAGE: dev
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      SITE_URL: http://localhost
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: "lax"
+      DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ENDPOINT_INTERNAL: http://minio:9000
+      STORAGE_ENDPOINT_PUBLIC: http://localhost
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_PUBLIC_BUCKET: media-public
+      STORAGE_PRIVATE_BUCKET: media-private
+      STORAGE_PRESIGN_EXPIRES_SEC: 600
+      STORAGE_USE_PATH_STYLE: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: nginx
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: templatepg
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+        mc mb --ignore-existing local/media-public;
+        mc mb --ignore-existing local/media-private;
+        mc anonymous set download local/media-public;
+        echo 'MinIO buckets are ready';
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
