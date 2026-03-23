@@ -52,3 +52,8 @@ class UnknownRolesError(NotFoundError):
 class UserNotFoundError(NotFoundError):
     error_code = "USER_NOT_FOUND"
     default_detail = "User not found"
+
+
+class ProtectedAdminRoleError(BadRequestError):
+    error_code = "PROTECTED_ADMIN_ROLE"
+    default_detail = "Bootstrap admins must keep the admin role"
