@@ -1,17 +1,64 @@
 {
-  "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
-    }
-  ],
   "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
-    }
-  }
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/app/App.tsx",
+    "src/app/main.tsx",
+    "src/app/routes/**/*",
+    "src/entities/user/**/*",
+    "src/features/auth/**/*",
+    "src/features/profile/**/*",
+    "src/features/navigation/ui/HeaderUserMenu.tsx",
+    "src/pages/auth/**/*",
+    "src/pages/Profile/**/*",
+    "src/shared/api/profile.ts",
+    "src/shared/components/app-sidebar.tsx",
+    "src/shared/components/chart-area-interactive.tsx",
+    "src/shared/components/data-table.tsx",
+    "src/shared/components/nav-documents.tsx",
+    "src/shared/components/nav-main.tsx",
+    "src/shared/components/nav-secondary.tsx",
+    "src/shared/components/nav-user.tsx",
+    "src/shared/components/section-cards.tsx",
+    "src/shared/components/site-header.tsx",
+    "src/shared/components/ui/chart.tsx",
+    "src/shared/components/ui/sidebar.tsx",
+    "src/vite-env.d.ts"
+  ]
 }
