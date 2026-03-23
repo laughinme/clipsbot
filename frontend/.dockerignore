@@ -1,0 +1,10 @@
+.next
+node_modules
+dist
+npm-debug.log*
+.env.local
+.vercel
+coverage
+README-dev.md
+openapi.json
+tsconfig.tsbuildinfo
