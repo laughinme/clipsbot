@@ -11,7 +11,7 @@ import { withBasePath } from "@/shared/lib/utils";
 import { resolveCsrfToken } from "../lib/csrf";
 const DEFAULT_API_PATH = "/api/v1";
 const BASE_URL = withBasePath(
-  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  process.env.NEXT_PUBLIC_API_BASE_URL as string | undefined,
   DEFAULT_API_PATH
 );
 

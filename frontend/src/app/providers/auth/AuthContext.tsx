@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/shared/api/auth";
@@ -7,7 +9,7 @@ import {
   setUnauthorizedHandler as setAxiosUnauthorizedHandler
 } from "@/shared/api/axiosInstance";
 import { AuthContext } from "./AuthContextObject";
-import type { AuthContextValue, AuthCredentials, AuthTokens, AuthUser } from "@/entities/auth/model";
+import type { AuthContextValue, AuthTokens, AuthUser } from "@/entities/auth/model";
 
 const SKIP_SESSION_RESTORE_STORAGE_KEY = "auth:skip-session-restore";
 
@@ -33,6 +35,7 @@ const writeSkipSessionRestoreFlag = (value: boolean): void => {
       window.sessionStorage.removeItem(SKIP_SESSION_RESTORE_STORAGE_KEY);
     }
   } catch {
+    // Session storage may be unavailable in privacy-restricted contexts.
   }
 };
 
@@ -86,26 +89,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     retry: 1
   });
 
-  const loginMutation = useMutation<AuthTokens, unknown, AuthCredentials>({
-    mutationFn: api.loginUser,
-    onSuccess: (data) => {
-      if (data?.access_token) {
-        setAccessToken(data.access_token);
-        setSkipSessionRestore(false);
-      }
-      queryClient.invalidateQueries({ queryKey: ["me"] });
-    }
+  const telegramMutation = useMutation<AuthTokens, unknown, string>({
+    mutationFn: api.authenticateTelegram,
   });
 
-  const registerMutation = useMutation<AuthTokens, unknown, AuthCredentials>({
-    mutationFn: api.registerUser,
-    onSuccess: (data) => {
-      if (data?.access_token) {
-        setAccessToken(data.access_token);
-        setSkipSessionRestore(false);
-      }
-      queryClient.invalidateQueries({ queryKey: ["me"] });
-    }
+  const browserCompleteMutation = useMutation<AuthTokens, unknown, string>({
+    mutationFn: api.completeBrowserLogin,
   });
 
   const logoutMutation = useMutation<void, unknown, void>({
@@ -149,23 +138,40 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           setSkipSessionRestore(false);
         }
       } catch {
+        // Silent failure keeps the app in logged-out mode when refresh is not available.
       } finally {
         setIsRestoringSession(false);
       }
     })();
-  }, []);
+  }, [setSkipSessionRestore]);
+
+  const applyTokens = useCallback((data: AuthTokens): void => {
+    if (data?.access_token) {
+      setAccessToken(data.access_token);
+      setSkipSessionRestore(false);
+    }
+    queryClient.invalidateQueries({ queryKey: ["me"] });
+  }, [queryClient, setSkipSessionRestore]);
 
   const value: AuthContextValue = {
     user: !isError && user ? user : null,
     isUserLoading,
     isRestoringSession,
-    login: loginMutation.mutateAsync,
-    register: registerMutation.mutateAsync,
+    authenticateTelegram: async (initData: string) => {
+      const data = await telegramMutation.mutateAsync(initData);
+      applyTokens(data);
+      return data;
+    },
+    completeBrowserLogin: async (challengeToken: string) => {
+      const data = await browserCompleteMutation.mutateAsync(challengeToken);
+      applyTokens(data);
+      return data;
+    },
     logout: handleLogout,
-    isLoggingIn: loginMutation.isPending,
-    loginError: loginMutation.error,
-    isRegistering: registerMutation.isPending,
-    registerError: registerMutation.error
+    isAuthenticatingTelegram: telegramMutation.isPending,
+    isCompletingBrowserLogin: browserCompleteMutation.isPending,
+    telegramAuthError: telegramMutation.error,
+    browserLoginError: browserCompleteMutation.error,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
