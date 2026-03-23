@@ -186,6 +186,7 @@ secrets/
 /backend/src/media
 test.py
 /.vscode
+nginx/certs/
 
 # Allow tracked frontend shared utilities
 !frontend/src/shared/lib/
