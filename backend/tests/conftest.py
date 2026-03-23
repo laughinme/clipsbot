@@ -40,6 +40,7 @@ os.environ.setdefault("STORAGE_AUTO_CREATE_BUCKETS", "false")
 os.environ.setdefault("JWT_PRIVATE_KEY_PATH", str(SECRETS_DIR / "jwt_private_key.pem"))
 os.environ.setdefault("JWT_PUBLIC_KEY_PATH", str(SECRETS_DIR / "jwt_public_key.pem"))
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
+os.environ.setdefault("RABBITMQ_ENABLED", "false")
 
 from core.config import clear_settings_cache
 
@@ -142,7 +143,7 @@ async def _integration_state(
     await dispose_engine()
     engine = get_engine()
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE user_roles, users RESTART IDENTITY CASCADE"))
+        await conn.execute(text("TRUNCATE TABLE clip_aliases, clips, user_roles, users RESTART IDENTITY CASCADE"))
 
     await redis_client.flushdb()
     yield
