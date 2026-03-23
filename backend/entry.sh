@@ -5,6 +5,9 @@ echo "Running Alembic migrations..."
 cd src
 alembic upgrade head
 
+echo "Running startup seeders..."
+python -m service.bootstrap
+
 echo "Starting the application..."
 exec uvicorn main:app \
   --host "${API_HOST:-0.0.0.0}" \
