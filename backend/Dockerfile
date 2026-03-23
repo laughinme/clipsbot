@@ -1,12 +1,15 @@
 FROM python:3.13.7-slim
 
-# NOTE: for alpine use this line
-# RUN apk add --no-cache bash
-
 WORKDIR /app
+
+ARG INSTALL_FFMPEG=false
 
 ENV POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_CREATE=false
+
+RUN if [ "$INSTALL_FFMPEG" = "true" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/* ; \
+    fi
 
 RUN pip install --no-cache-dir "poetry==2.3.2"
 

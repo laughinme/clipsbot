@@ -3,6 +3,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        INSTALL_FFMPEG: "false"
     container_name: backend
     env_file:
       - ./backend/.env
@@ -10,20 +12,27 @@ services:
       APP_STAGE: dev
       API_HOST: 0.0.0.0
       API_PORT: 8080
-      SITE_URL: http://localhost
+      SITE_URL: ${SITE_URL:-http://localhost}
       COOKIE_SECURE: "false"
       COOKIE_SAMESITE: "lax"
       DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
       REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_ENABLED: "true"
       STORAGE_ENDPOINT_INTERNAL: http://minio:9000
-      STORAGE_ENDPOINT_PUBLIC: http://localhost
+      STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
       STORAGE_REGION: us-east-1
       STORAGE_ACCESS_KEY: minioadmin
       STORAGE_SECRET_KEY: minioadmin
       STORAGE_PUBLIC_BUCKET: media-public
       STORAGE_PRIVATE_BUCKET: media-private
+      STORAGE_CLIPS_BUCKET: clips
       STORAGE_PRESIGN_EXPIRES_SEC: 600
       STORAGE_USE_PATH_STYLE: "true"
+      # WEBAPP_URL: http://localhost/admin
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-clips}
+      INTERNAL_BOT_TOKEN: ${INTERNAL_BOT_TOKEN:-change-me-internal-bot-token}
     depends_on:
       db:
         condition: service_healthy
@@ -31,10 +40,117 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - ./backend/secrets:/app/secrets:ro
     ports:
       - "8080:8080"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_FFMPEG: "true"
+    container_name: worker
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_STAGE: dev
+      DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      STORAGE_ENDPOINT_INTERNAL: http://minio:9000
+      STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_PUBLIC_BUCKET: media-public
+      STORAGE_PRIVATE_BUCKET: media-private
+      STORAGE_CLIPS_BUCKET: clips
+      STORAGE_USE_PATH_STYLE: "true"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
+    entrypoint: ["python", "-m", "worker.main"]
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_FFMPEG: "false"
+    container_name: scheduler
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_STAGE: dev
+      DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      STORAGE_ENDPOINT_INTERNAL: http://minio:9000
+      STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_PUBLIC_BUCKET: media-public
+      STORAGE_PRIVATE_BUCKET: media-private
+      STORAGE_CLIPS_BUCKET: clips
+      STORAGE_USE_PATH_STYLE: "true"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./backend/secrets:/app/secrets:ro
+    entrypoint: ["python", "-m", "scheduler.main"]
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: bot
+    env_file:
+      - ./bot/.env
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-clips}
+      INTERNAL_BACKEND_URL: http://backend:8080/api/v1/internal
+      INTERNAL_BOT_TOKEN: ${INTERNAL_BOT_TOKEN:-change-me-internal-bot-token}
+      # WEBAPP_URL: http://localhost/admin
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+    container_name: frontend
+    env_file:
+      - ./frontend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+    depends_on:
+      backend:
+        condition: service_started
     restart: unless-stopped
 
   nginx:
@@ -46,6 +162,8 @@ services:
       - "80:80"
     depends_on:
       backend:
+        condition: service_started
+      frontend:
         condition: service_started
       minio:
         condition: service_started
@@ -81,6 +199,18 @@ services:
       retries: 5
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
@@ -106,7 +236,9 @@ services:
         until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
         mc mb --ignore-existing local/media-public;
         mc mb --ignore-existing local/media-private;
+        mc mb --ignore-existing local/clips;
         mc anonymous set download local/media-public;
+        mc anonymous set download local/clips;
         echo 'MinIO buckets are ready';
     restart: "no"
 
