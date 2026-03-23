@@ -4,6 +4,7 @@ from core.config import get_settings
 
 from .storage_service import (
     ALLOWED_AVATAR_CONTENT_TYPES,
+    ALLOWED_CLIP_CONTENT_TYPES,
     MediaStorageService,
 )
 
@@ -21,6 +22,7 @@ def get_media_storage_service() -> MediaStorageService:
         presign_expires_sec=settings.STORAGE_PRESIGN_EXPIRES_SEC,
         public_bucket=settings.STORAGE_PUBLIC_BUCKET,
         private_bucket=settings.STORAGE_PRIVATE_BUCKET,
+        clips_bucket=settings.STORAGE_CLIPS_BUCKET,
     )
 
 

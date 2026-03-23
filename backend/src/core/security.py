@@ -1,10 +1,12 @@
 import json
+import secrets
 from typing import Annotated, Literal
 
 import jwt
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from core.config import get_settings
 from core.errors import ForbiddenError, UnauthorizedError
 from core.rbac import (
     ROLES_CACHE_TTL_SECONDS, 
@@ -149,6 +151,16 @@ def require(
         #         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="You don't have permission to do this")
 
     return dependency
+
+
+async def require_internal_service(
+    x_internal_service_token: Annotated[str | None, Header(alias="X-Internal-Service-Token")] = None,
+) -> None:
+    settings = get_settings()
+    if not x_internal_service_token:
+        raise UnauthorizedError("Missing internal service token")
+    if not secrets.compare_digest(x_internal_service_token, settings.INTERNAL_BOT_TOKEN):
+        raise UnauthorizedError("Invalid internal service token")
 
 
 # async def _resolve_permissions(

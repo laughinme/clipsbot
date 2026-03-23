@@ -2,12 +2,11 @@ from typing import Any
 
 from fastapi import Response
 
-from core.config import Settings
-
-settings = Settings()  # pyright: ignore[reportCallIssue]
+from core.config import get_settings
 
 
 def _base_cookie_kwargs() -> dict[str, Any]:
+    settings = get_settings()
     kwargs: dict[str, Any] = {
         "secure": settings.COOKIE_SECURE,
         "samesite": settings.COOKIE_SAMESITE,
@@ -19,6 +18,7 @@ def _base_cookie_kwargs() -> dict[str, Any]:
 
 
 def set_auth_cookies(response: Response, refresh_token: str, csrf_token: str) -> None:
+    settings = get_settings()
     base_kwargs = _base_cookie_kwargs()
     response.set_cookie(
         "refresh_token",
