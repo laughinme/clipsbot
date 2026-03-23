@@ -3,13 +3,14 @@ from urllib.parse import quote
 from uuid import UUID, uuid4
 from datetime import datetime
 from sqlalchemy.orm import mapped_column, Mapped, relationship
-from sqlalchemy import Uuid, String, Boolean, DateTime, Text, Index, Integer
+from sqlalchemy import BigInteger, Uuid, String, Boolean, DateTime, Index, Integer
 
 from core.config import get_settings
 from ..table_base import Base
 from ..mixins import TimestampMixin
 
 if TYPE_CHECKING:
+    from ..clips import Clip
     from ..roles import Role
 
 
@@ -17,18 +18,13 @@ class User(TimestampMixin, Base):
     __tablename__ = "users"
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), default=uuid4, primary_key=True)
-    
-    # Credentials
-    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    # Minimal profile for template
+
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     username: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    
-    # Service
-    is_onboarded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    telegram_avatar_file_unique_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     banned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auth_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
@@ -42,18 +38,17 @@ class User(TimestampMixin, Base):
             postgresql_using='gin',
             postgresql_ops={'username': 'gin_trgm_ops'}
         ),
-        Index(
-            'users_email_trgm',
-            'email',
-            postgresql_using='gin',
-            postgresql_ops={'email': 'gin_trgm_ops'}
-        ),
     )
     
     roles: Mapped[list["Role"]] = relationship(  # pyright: ignore
         "Role",
         secondary="user_roles",
         back_populates="users",
+        lazy="selectin",
+    )
+    uploaded_clips: Mapped[list["Clip"]] = relationship(  # pyright: ignore[name-defined]
+        "Clip",
+        back_populates="uploaded_by",
         lazy="selectin",
     )
     

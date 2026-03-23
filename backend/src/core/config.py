@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SQL_ECHO: bool = False
     SCHEDULER_ENABLED: bool = False
+    RABBITMQ_ENABLED: bool = True
 
     # API settings
     API_PORT: int = 8080
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     
     # Site data (url, paths)
     SITE_URL: str = ''
+    WEBAPP_URL: str = ''
     
     # Media settings
     MEDIA_DIR: str = 'media'
@@ -43,6 +45,7 @@ class Settings(BaseSettings):
     STORAGE_SECRET_KEY: str = "minioadmin"
     STORAGE_PUBLIC_BUCKET: str = "media-public"
     STORAGE_PRIVATE_BUCKET: str = "media-private"
+    STORAGE_CLIPS_BUCKET: str = "clips"
     STORAGE_PRESIGN_EXPIRES_SEC: int = 600
     STORAGE_USE_PATH_STYLE: bool = True
     STORAGE_AUTO_CREATE_BUCKETS: bool = True
@@ -51,7 +54,13 @@ class Settings(BaseSettings):
     NOTIFICATIONS_PROVIDER: Literal["noop", "telegram"] = "noop"
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
-    
+    TELEGRAM_BOT_USERNAME: str = ""
+    TELEGRAM_AUTH_MAX_AGE_SEC: int = 60 * 60 * 24
+    UPLOADER_INVITE_TTL_HOURS: int = 72
+    INTERNAL_BOT_TOKEN: str = "change-me-internal-bot-token"
+    AUTH_DEFAULT_ROLE_SLUG: str = ""
+    BOOTSTRAP_ADMIN_TELEGRAM_IDS: str = ""
+
     # Auth Settings    
     JWT_PRIVATE_KEY: str | None = None
     JWT_PUBLIC_KEY: str | None = None
@@ -75,6 +84,7 @@ class Settings(BaseSettings):
     # Database settings
     DATABASE_URL: str
     REDIS_URL: str
+    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
 
     @field_validator("COOKIE_SAMESITE", mode="before")
     @classmethod
@@ -113,6 +123,24 @@ class Settings(BaseSettings):
             return value
         return value.rstrip("/")
 
+    @field_validator("AUTH_DEFAULT_ROLE_SLUG", mode="before")
+    @classmethod
+    def _normalize_default_role_slug(cls, value: str | None) -> str:
+        if value is None:
+            return ""
+        return str(value).strip().lower()
+
+    @field_validator("BOOTSTRAP_ADMIN_TELEGRAM_IDS", mode="before")
+    @classmethod
+    def _normalize_bootstrap_admin_ids(cls, value: str | None) -> str:
+        if value is None:
+            return ""
+        return ",".join(
+            part.strip()
+            for part in str(value).replace(";", ",").split(",")
+            if part.strip()
+        )
+
     @model_validator(mode="after")
     def _load_jwt_keys(self) -> "Settings":
         if not self.JWT_PRIVATE_KEY and self.JWT_PRIVATE_KEY_PATH:
@@ -129,7 +157,19 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT keys are required. Provide JWT_PRIVATE_KEY/JWT_PUBLIC_KEY or JWT_*_PATH."
             )
+        if not self.WEBAPP_URL and self.SITE_URL:
+            self.WEBAPP_URL = f"{self.SITE_URL.rstrip('/')}/admin"
         return self
+
+    @property
+    def bootstrap_admin_telegram_ids(self) -> list[int]:
+        values: list[int] = []
+        for part in self.BOOTSTRAP_ADMIN_TELEGRAM_IDS.split(","):
+            candidate = part.strip()
+            if not candidate:
+                continue
+            values.append(int(candidate))
+        return values
 
 
 @lru_cache

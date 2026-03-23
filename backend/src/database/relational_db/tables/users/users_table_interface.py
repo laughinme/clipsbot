@@ -1,6 +1,5 @@
 from uuid import UUID
 from datetime import UTC, datetime, timedelta
-from pydantic import EmailStr
 from sqlalchemy import select, and_, or_, func, delete, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,18 +19,19 @@ class UserInterface:
     async def get_by_id(self, id: UUID | str) -> User | None:
         stmt = (
             select(User)
+            .options(selectinload(User.roles))
             .where(User.id == id)
         )
         user = await self.session.scalar(stmt)
         
         return user
     
-    async def get_by_email(self, email: EmailStr) -> User | None:
-        user = await self.session.scalar(
-            select(User).where(User.email == email)
+    async def get_by_telegram_id(self, telegram_id: int) -> User | None:
+        return await self.session.scalar(
+            select(User)
+            .options(selectinload(User.roles))
+            .where(User.telegram_id == telegram_id)
         )
-        
-        return user
 
     async def admin_list_users(
         self,
@@ -50,7 +50,12 @@ class UserInterface:
             stmt = stmt.where(User.banned == banned)
         if search:
             pattern = f"%{search}%"
-            stmt = stmt.where(or_(User.username.ilike(pattern), User.email.ilike(pattern)))
+            stmt = stmt.where(
+                or_(
+                    User.username.ilike(pattern),
+                    User.telegram_username.ilike(pattern),
+                )
+            )
 
         # Cursor pagination (created_at desc, id desc)
         if cursor_created_at is not None and cursor_id is not None:
@@ -101,13 +106,10 @@ class UserInterface:
         self,
         *,
         banned: bool | None = None,
-        onboarded: bool | None = None,
     ) -> int:
         stmt = select(func.count(User.id))
         if banned is not None:
             stmt = stmt.where(User.banned == banned)
-        if onboarded is not None:
-            stmt = stmt.where(User.is_onboarded == onboarded)
 
         result = await self.session.scalar(stmt)
         return int(result or 0)

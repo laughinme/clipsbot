@@ -13,6 +13,26 @@ ALLOWED_AVATAR_CONTENT_TYPES = {
     "image/png",
     "image/webp",
 }
+ALLOWED_CLIP_CONTENT_TYPES = {
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/x-mpeg",
+    "audio/x-mp3",
+    "audio/ogg",
+    "application/ogg",
+    "audio/opus",
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/aac",
+    "audio/x-aac",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/flac",
+    "audio/x-flac",
+    "audio/webm",
+    "application/octet-stream",
+}
 
 _EXTENSIONS_BY_CONTENT_TYPE = {
     "image/jpeg": {".jpg", ".jpeg"},
@@ -50,12 +70,14 @@ class MediaStorageService:
         presign_expires_sec: int,
         public_bucket: str,
         private_bucket: str,
+        clips_bucket: str,
     ) -> None:
         self.public_endpoint = public_endpoint.rstrip("/")
         self.region = region
         self.presign_expires_sec = presign_expires_sec
         self.public_bucket = public_bucket
         self.private_bucket = private_bucket
+        self.clips_bucket = clips_bucket
 
         s3_config = Config(
             signature_version="s3v4",
@@ -85,6 +107,12 @@ class MediaStorageService:
         if ext not in allowed_ext:
             ext = _default_extension(content_type)
         return f"avatars/{user_id}/{uuid4().hex}{ext}"
+
+    def build_clip_key(self, clip_id: UUID | str, filename: str, content_type: str) -> str:
+        ext = Path(filename).suffix.lower()
+        if ext != ".mp3":
+            ext = ".mp3"
+        return f"clips/{clip_id}/{uuid4().hex}{ext}"
 
     def create_presigned_upload_url(
         self,
@@ -156,12 +184,14 @@ class MediaStorageService:
     def ensure_buckets(self) -> None:
         self.ensure_bucket(self.public_bucket)
         self.ensure_bucket(self.private_bucket)
+        self.ensure_bucket(self.clips_bucket)
 
     def check_health(self) -> None:
         """Raise an exception if storage is unreachable or buckets are missing."""
         self._internal_client.list_buckets()
         self._internal_client.head_bucket(Bucket=self.public_bucket)
         self._internal_client.head_bucket(Bucket=self.private_bucket)
+        self._internal_client.head_bucket(Bucket=self.clips_bucket)
 
     def put_object_bytes(
         self,
@@ -177,6 +207,10 @@ class MediaStorageService:
             Body=payload,
             ContentType=content_type,
         )
+
+    def get_object_bytes(self, *, bucket: str, key: str) -> bytes:
+        response = self._internal_client.get_object(Bucket=bucket, Key=key)
+        return response["Body"].read()
 
     def delete_prefix(self, *, bucket: str, prefix: str) -> int:
         deleted_count = 0
