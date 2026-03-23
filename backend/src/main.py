@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 
+from aio_pika import connect_robust
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -98,6 +99,15 @@ def create_app(
         except Exception as exc:
             logger.warning("Redis readiness check failed: %s", exc)
             checks["redis"] = "error"
+
+        if settings.RABBITMQ_ENABLED:
+            try:
+                connection = await connect_robust(settings.RABBITMQ_URL)
+                await connection.close()
+                checks["rabbitmq"] = "ok"
+            except Exception as exc:
+                logger.warning("RabbitMQ readiness check failed: %s", exc)
+                checks["rabbitmq"] = "error"
 
         try:
             storage = get_media_storage_service()
