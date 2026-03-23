@@ -19,7 +19,7 @@ async def list_users(
     _: Annotated[User, Depends(require('admin'))],
     svc: Annotated[UserService, Depends(get_user_service)],
     banned: bool | None = Query(None, description='Filter by banned status'),
-    search: str | None = Query(None, description='Search by username or email'),
+    search: str | None = Query(None, description='Search by name or Telegram username'),
     limit: int = Query(50, ge=1, le=100, description='Page size'),
     cursor: str | None = Query(None, description='Opaque cursor'),
 ):
