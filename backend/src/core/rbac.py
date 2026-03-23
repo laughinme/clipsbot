@@ -12,12 +12,11 @@ def roles_cache_key(user_id: UUID | str, version: int) -> str:
  
  
 GLOBAL_ROLE_IMPLICATIONS = {
-    "admin": {"member"},
-    "member": set(),
+    "admin": {"uploader"},
+    "uploader": set(),
 }
 
 TEAM_ROLE_IMPLICATIONS = {
-    "owner": {"admin", "member"},
-    "admin": {"member"},
-    "member": set(),
+    "owner": {"admin"},
+    "admin": set(),
 }

@@ -52,7 +52,7 @@ def upgrade() -> None:
     )
     
     admin_role_id = uuid4()
-    member_role_id = uuid4()
+    uploader_role_id = uuid4()
     
     op.bulk_insert(
         roles_table,
@@ -64,10 +64,10 @@ def upgrade() -> None:
                 "description": "Full administrative access",
             },
             {
-                "id": member_role_id,
-                "slug": "member",
-                "name": "Member",
-                "description": "Default role for registered users",
+                "id": uploader_role_id,
+                "slug": "uploader",
+                "name": "Uploader",
+                "description": "Can upload and manage clips",
             },
         ],
     )
