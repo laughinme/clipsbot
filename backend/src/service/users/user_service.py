@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from datetime import UTC
 from uuid import UUID
 
 from core.config import get_settings
@@ -20,6 +21,7 @@ from .exceptions import (
     AvatarUnsupportedContentTypeError,
     InvalidAvatarObjectKeyError,
     InvalidCursorError,
+    ProtectedAdminRoleError,
     UnknownRolesError,
     UnsupportedAvatarContentTypeError,
 )
@@ -45,6 +47,9 @@ class UserService:
         
     async def get_user(self, user_id: UUID | str) -> User | None:
         return await self.user_repo.get_by_id(user_id)
+
+    async def get_user_by_telegram_id(self, telegram_id: int) -> User | None:
+        return await self.user_repo.get_by_telegram_id(telegram_id)
         
     async def patch_user(self, payload: UserPatch, user: User):
         data = payload.model_dump(exclude_none=True)
@@ -182,12 +187,27 @@ class UserService:
     async def list_languages(self, search: str, limit: int):
         return await self.lang_repo.search(search, limit)
 
+    async def list_roles(
+        self,
+        *,
+        search: str | None = None,
+        limit: int | None = None,
+    ):
+        return await self.role_repo.list_roles(search=search, limit=limit)
+
     async def admin_assign_roles(
         self,
         target: User,
         role_slugs: list[str],
     ) -> User:
         unique_slugs = list(dict.fromkeys(role_slugs))
+        if (
+            target.telegram_id is not None
+            and target.telegram_id in self.settings.bootstrap_admin_telegram_ids
+            and "admin" not in unique_slugs
+        ):
+            raise ProtectedAdminRoleError()
+
         roles = await self.role_repo.get_by_slugs(unique_slugs)
         found_slugs = {role.slug for role in roles}
         missing = [slug for slug in unique_slugs if slug not in found_slugs]
