@@ -18,14 +18,12 @@ class StatService:
         since_24h = now - timedelta(hours=24)
 
         total_users = await self.user_repo.count_users()
-        onboarded_users = await self.user_repo.count_users(onboarded=True)
         banned_users = await self.user_repo.count_users(banned=True)
         registered_last_24h = await self.user_repo.count_registered_since(since_24h)
 
         return UserStatsSummary(
             generated_at=now,
             total_users=total_users,
-            onboarded_users=onboarded_users,
             banned_users=banned_users,
             registered_last_24h=registered_last_24h,
         )
