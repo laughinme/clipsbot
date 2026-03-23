@@ -1,14 +1,11 @@
-from fastapi import APIRouter, Depends
-
-from core.rate_limit import AUTH_LIMITER_STATE_KEY, build_rate_dependency
-
-auth_rate_limit = build_rate_dependency(AUTH_LIMITER_STATE_KEY)
+from fastapi import APIRouter
 
 
 def get_auth_routers() -> APIRouter:
-    from .registration import router as register_router
-    from .login import router as login_router
+    from .browser import router as browser_router
+    from .login import router as logout_router
     from .refresh import router as refresh_router
+    from .telegram import router as telegram_router
     
     router = APIRouter(
         prefix='/auth', 
@@ -18,11 +15,11 @@ def get_auth_routers() -> APIRouter:
             403: {"description": "Forbidden"},
             429: {"description": "Too Many Requests"}
         },
-        dependencies=[Depends(auth_rate_limit)]
     )
     
-    router.include_router(register_router)
-    router.include_router(login_router)
+    router.include_router(browser_router)
+    router.include_router(logout_router)
     router.include_router(refresh_router)
+    router.include_router(telegram_router)
     
     return router
