@@ -217,11 +217,11 @@ class ArchiveSourceService:
         if source is None:
             raise NotFoundError("Archive source not found.")
 
-        jobs = await self.indexing_job_repo.list_for_sync_run(sync_run.id)
-        queued_items = sum(1 for job in jobs if job.status == "queued")
-        processing_items = sum(1 for job in jobs if job.status == "processing")
-        indexed_items = sum(1 for job in jobs if job.status == "done")
-        failed_items = sum(1 for job in jobs if job.status == "failed")
+        counts = await self.indexing_job_repo.get_sync_run_status_counts(sync_run.id)
+        queued_items = counts["queued_items"]
+        processing_items = counts["processing_items"]
+        indexed_items = counts["indexed_items"]
+        failed_items = counts["failed_items"]
 
         sync_run.indexed_items = indexed_items
         sync_run.failed_items = failed_items

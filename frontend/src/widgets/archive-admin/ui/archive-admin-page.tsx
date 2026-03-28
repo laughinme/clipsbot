@@ -167,6 +167,10 @@ export default function ArchiveAdminPage() {
     return map;
   }, [syncsQuery.data]);
 
+  const syncsErrorMessage = syncsQuery.isError
+    ? getErrorMessage(syncsQuery.error, t("archiveAdmin.syncStatusLoadFailed"))
+    : null;
+
   const enrichmentRunsBySource = useMemo(() => {
     const map = new Map<string, EnrichmentRunStatusDto[]>();
     for (const entry of enrichmentRunsQuery.data ?? []) {
@@ -182,13 +186,17 @@ export default function ArchiveAdminPage() {
     return map;
   }, [enrichmentRunsQuery.data]);
 
+  const enrichmentErrorMessage = enrichmentRunsQuery.isError
+    ? getErrorMessage(enrichmentRunsQuery.error, t("archiveAdmin.enrichmentStatusLoadFailed"))
+    : null;
+
   const activeSyncs = useMemo(
     () => (syncsQuery.data ?? []).filter((run) => run.status === "scanning" || run.status === "indexing"),
     [syncsQuery.data],
   );
 
   const activeEnrichmentRuns = useMemo(
-    () => (enrichmentRunsQuery.data ?? []).filter((run) => run.status === "queued" || run.status === "processing"),
+    () => (enrichmentRunsQuery.data ?? []).filter((run) => run.status === "created" || run.status === "running"),
     [enrichmentRunsQuery.data],
   );
 
@@ -463,7 +471,16 @@ export default function ArchiveAdminPage() {
                 </p>
                 <h2 className="mt-2 text-2xl font-black tracking-tight">{t("archiveAdmin.historyTitle")}</h2>
               </div>
-              <Button type="button" variant="ghost" onClick={() => void sourcesQuery.refetch()} disabled={sourcesQuery.isFetching}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  void sourcesQuery.refetch();
+                  void syncsQuery.refetch();
+                  void enrichmentRunsQuery.refetch();
+                }}
+                disabled={sourcesQuery.isFetching || syncsQuery.isFetching || enrichmentRunsQuery.isFetching}
+              >
                 <RefreshCw className={`mr-2 h-4 w-4 ${sourcesQuery.isFetching ? "animate-spin" : ""}`} />
                 {t("archiveAdmin.refresh")}
               </Button>
@@ -543,7 +560,11 @@ export default function ArchiveAdminPage() {
                           </div>
                         </div>
 
-                        {syncs.length === 0 ? (
+                        {syncsErrorMessage ? (
+                          <div className="rounded-2xl border border-dashed border-destructive/40 bg-destructive/5 p-5 text-sm text-destructive">
+                            {syncsErrorMessage}
+                          </div>
+                        ) : syncs.length === 0 ? (
                           <div className="rounded-2xl border border-dashed border-border/70 p-5 text-sm text-muted-foreground">
                             {t("archiveAdmin.noSyncsYet")}
                           </div>
@@ -555,7 +576,11 @@ export default function ArchiveAdminPage() {
                           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                             {t("archiveAdmin.enrichmentHistoryTitle")}
                           </p>
-                          {enrichmentRuns.length === 0 ? (
+                          {enrichmentErrorMessage ? (
+                            <div className="rounded-2xl border border-dashed border-destructive/40 bg-destructive/5 p-5 text-sm text-destructive">
+                              {enrichmentErrorMessage}
+                            </div>
+                          ) : enrichmentRuns.length === 0 ? (
                             <div className="rounded-2xl border border-dashed border-border/70 p-5 text-sm text-muted-foreground">
                               {t("archiveAdmin.noEnrichmentRunsYet")}
                             </div>

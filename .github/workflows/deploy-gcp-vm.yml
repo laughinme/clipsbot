@@ -1,0 +1,63 @@
+name: deploy-gcp-vm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy-gcp-vm.yml"
+      - "backend/**"
+      - "bot/**"
+      - "frontend/**"
+      - "caddy/**"
+      - "docker-compose.yml"
+      - "ops/gcp/**"
+      - ".env.example"
+      - "backend/.env.example"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      ZONE: ${{ vars.GCP_ZONE }}
+      INSTANCE_NAME: ${{ vars.GCP_INSTANCE_NAME }}
+      PUBLIC_HOSTNAME: ${{ vars.PUBLIC_HOSTNAME }}
+      SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Restore deploy environment files
+        shell: bash
+        run: |
+          printf '%s' '${{ secrets.CLOUD_ROOT_ENV }}' > .env
+          printf '%s' '${{ secrets.CLOUD_BACKEND_ENV }}' > backend/.env
+          mkdir -p backend/secrets
+          printf '%s' '${{ secrets.JWT_PRIVATE_KEY }}' > backend/secrets/jwt_private_key.pem
+          printf '%s' '${{ secrets.JWT_PUBLIC_KEY }}' > backend/secrets/jwt_public_key.pem
+          chmod 600 backend/secrets/jwt_private_key.pem backend/secrets/jwt_public_key.pem
+
+      - name: Deploy to the archive VM
+        shell: bash
+        env:
+          ADC_JSON_SOURCE: ${{ steps.auth.outputs.credentials_file_path }}
+          SKIP_EXPORT_SYNC: "true"
+        run: bash ops/gcp/deploy_vm.sh

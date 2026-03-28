@@ -1,11 +1,7 @@
-name: fly-deploy-backend
+name: fly-deploy-backend-manual
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend.yml"
+  workflow_dispatch:
 
 jobs:
   deploy:

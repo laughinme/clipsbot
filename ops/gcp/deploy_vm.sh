@@ -34,6 +34,7 @@ MACHINE_TYPE="${MACHINE_TYPE:-e2-standard-4}"
 BOOT_DISK_SIZE_GB="${BOOT_DISK_SIZE_GB:-100}"
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value core/project 2>/dev/null)}"
 EXPORT_DIR="${EXPORT_DIR:-/Users/laughinme/Downloads/AyuGram Desktop/ChatExport_2026-03-23}"
+SKIP_EXPORT_SYNC="${SKIP_EXPORT_SYNC:-false}"
 REMOTE_ROOT="/srv/clipsbot"
 REMOTE_IMPORT_ROOT="${REMOTE_ROOT}/imports"
 REMOTE_STAGING="~/clipsbot-stage"
@@ -49,7 +50,7 @@ if [[ -z "${PROJECT_ID}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${EXPORT_DIR}" ]]; then
+if [[ "${SKIP_EXPORT_SYNC}" != "true" && ! -d "${EXPORT_DIR}" ]]; then
   echo "EXPORT_DIR does not exist: ${EXPORT_DIR}"
   exit 1
 fi
@@ -192,7 +193,9 @@ tar \
   -czf "${REPO_TARBALL}" \
   -C "${ROOT_DIR}" .
 
-tar -cf "${EXPORT_TARBALL}" -C "$(dirname "${EXPORT_DIR}")" "$(basename "${EXPORT_DIR}")"
+if [[ "${SKIP_EXPORT_SYNC}" != "true" ]]; then
+  tar -cf "${EXPORT_TARBALL}" -C "$(dirname "${EXPORT_DIR}")" "$(basename "${EXPORT_DIR}")"
+fi
 
 gcloud compute ssh "${INSTANCE_NAME}" \
   "${GCLOUD_SSH_FLAGS[@]}" \
@@ -201,9 +204,11 @@ gcloud compute ssh "${INSTANCE_NAME}" \
 gcloud compute scp --quiet --force-key-file-overwrite "${REPO_TARBALL}" "${INSTANCE_NAME}:${REMOTE_STAGING}/repo.tar.gz" \
   --project "${PROJECT_ID}" \
   --zone "${ZONE}"
-gcloud compute scp --quiet --force-key-file-overwrite "${EXPORT_TARBALL}" "${INSTANCE_NAME}:${REMOTE_STAGING}/telegram-export.tar" \
-  --project "${PROJECT_ID}" \
-  --zone "${ZONE}"
+if [[ "${SKIP_EXPORT_SYNC}" != "true" ]]; then
+  gcloud compute scp --quiet --force-key-file-overwrite "${EXPORT_TARBALL}" "${INSTANCE_NAME}:${REMOTE_STAGING}/telegram-export.tar" \
+    --project "${PROJECT_ID}" \
+    --zone "${ZONE}"
+fi
 gcloud compute scp --quiet --force-key-file-overwrite /tmp/clipsbot-cloud/.env "${INSTANCE_NAME}:${REMOTE_STAGING}/.env" \
   --project "${PROJECT_ID}" \
   --zone "${ZONE}"
@@ -234,7 +239,9 @@ gcloud compute ssh "${INSTANCE_NAME}" \
     rm -rf app
     mkdir -p app
     cp ${REMOTE_STAGING}/repo.tar.gz ${REMOTE_ROOT}/repo.tar.gz
-    cp ${REMOTE_STAGING}/telegram-export.tar ${REMOTE_ROOT}/telegram-export.tar
+    if [ -f ${REMOTE_STAGING}/telegram-export.tar ]; then
+      cp ${REMOTE_STAGING}/telegram-export.tar ${REMOTE_ROOT}/telegram-export.tar
+    fi
     cp ${REMOTE_STAGING}/.env ${REMOTE_ROOT}/.env
     cp ${REMOTE_STAGING}/backend.env ${REMOTE_ROOT}/backend.env
     if [ -f ${REMOTE_STAGING}/application_default_credentials.json ]; then
@@ -243,7 +250,9 @@ gcloud compute ssh "${INSTANCE_NAME}" \
       touch ${REMOTE_ROOT}/adc/application_default_credentials.json
     fi
     tar -xzf ${REMOTE_ROOT}/repo.tar.gz -C app
-    tar -xf ${REMOTE_ROOT}/telegram-export.tar -C ${REMOTE_IMPORT_ROOT}
+    if [ -f ${REMOTE_ROOT}/telegram-export.tar ]; then
+      tar -xf ${REMOTE_ROOT}/telegram-export.tar -C ${REMOTE_IMPORT_ROOT}
+    fi
     cp ${REMOTE_ROOT}/.env app/.env
     cp ${REMOTE_ROOT}/backend.env app/backend/.env
     cd app
