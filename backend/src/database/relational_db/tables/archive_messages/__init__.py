@@ -1,0 +1,2 @@
+from .archive_messages_interface import TelegramMessageInterface
+from .archive_messages_table import TelegramMessage
