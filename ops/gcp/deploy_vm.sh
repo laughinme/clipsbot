@@ -42,6 +42,7 @@ REPO_TARBALL="/tmp/clipsbot-cloud-repo.tar.gz"
 EXPORT_TARBALL="/tmp/clipsbot-telegram-export.tar"
 ADC_JSON_SOURCE="${ADC_JSON_SOURCE:-${HOME}/.config/gcloud/application_default_credentials.json}"
 ADC_JSON_TMP="/tmp/clipsbot-cloud-adc.json"
+SKIP_ADC_SYNC="${SKIP_ADC_SYNC:-false}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-}"
 GCLOUD_SSH_FLAGS=(--project "${PROJECT_ID}" --zone "${ZONE}" --quiet --force-key-file-overwrite)
 
@@ -221,7 +222,7 @@ gcloud compute scp --quiet --force-key-file-overwrite /tmp/clipsbot-cloud/backen
   --project "${PROJECT_ID}" \
   --zone "${ZONE}"
 
-if [[ -f "${ADC_JSON_SOURCE}" ]]; then
+if [[ "${SKIP_ADC_SYNC}" != "true" && -f "${ADC_JSON_SOURCE}" ]]; then
   cp "${ADC_JSON_SOURCE}" "${ADC_JSON_TMP}"
   gcloud compute scp --quiet --force-key-file-overwrite "${ADC_JSON_TMP}" "${INSTANCE_NAME}:${REMOTE_STAGING}/application_default_credentials.json" \
     --project "${PROJECT_ID}" \
