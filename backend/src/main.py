@@ -16,6 +16,7 @@ from core.rate_limit import init_rate_limiters
 from database.redis import close_redis, init_redis
 from database.relational_db import dispose_engine, get_session_factory, wait_for_db
 from scheduler import init_scheduler, stop_scheduler
+from integrations.qdrant import get_qdrant_service
 from service.media import get_media_storage_service
 
 
@@ -102,12 +103,24 @@ def create_app(
 
         if settings.RABBITMQ_ENABLED:
             try:
-                connection = await connect_robust(settings.RABBITMQ_URL)
+                connection = await connect_robust(
+                    settings.RABBITMQ_URL,
+                    heartbeat=settings.RABBITMQ_HEARTBEAT_SEC,
+                )
                 await connection.close()
                 checks["rabbitmq"] = "ok"
             except Exception as exc:
                 logger.warning("RabbitMQ readiness check failed: %s", exc)
                 checks["rabbitmq"] = "error"
+
+        if settings.QDRANT_ENABLED:
+            try:
+                qdrant = get_qdrant_service()
+                await qdrant.check_health()
+                checks["qdrant"] = "ok"
+            except Exception as exc:
+                logger.warning("Qdrant readiness check failed: %s", exc)
+                checks["qdrant"] = "error"
 
         try:
             storage = get_media_storage_service()

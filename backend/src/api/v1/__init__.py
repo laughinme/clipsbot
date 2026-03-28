@@ -8,6 +8,7 @@ def get_v1_router() -> APIRouter:
     from .admins import get_admins_router
     from .internal import get_internal_router
     from .public import get_public_router
+    from .archive import get_archive_router
     
     router = APIRouter(prefix='/v1')
 
@@ -15,6 +16,7 @@ def get_v1_router() -> APIRouter:
     router.include_router(get_users_router())
     router.include_router(get_misc_router())
     router.include_router(get_admins_router())
+    router.include_router(get_archive_router())
     router.include_router(get_public_router())
     router.include_router(get_internal_router())
     
