@@ -1,0 +1,2 @@
+from .corpus_assets_interface import CorpusAssetInterface
+from .corpus_assets_table import CorpusAsset
