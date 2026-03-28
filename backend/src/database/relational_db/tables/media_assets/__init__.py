@@ -1,0 +1,2 @@
+from .media_assets_interface import MediaAssetInterface
+from .media_assets_table import MediaAsset

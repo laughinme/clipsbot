@@ -5,3 +5,12 @@ from .roles import *
 from .clips import *
 from .browser_login_challenges import *
 from .uploader_invites import *
+from .source_connections import *
+from .sync_runs import *
+from .corpus_items import *
+from .corpus_assets import *
+from .corpus_enrichments import *
+from .corpus_projections import *
+from .enrichment_jobs import *
+from .enrichment_runs import *
+from .indexing_jobs import *
