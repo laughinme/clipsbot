@@ -178,8 +178,13 @@ EOF
 
 cp /tmp/clipsbot-cloud/.env /tmp/clipsbot-cloud/backend.env
 
+tar_args=()
+if tar --help 2>&1 | grep -q -- "--disable-copyfile"; then
+  tar_args+=(--disable-copyfile)
+fi
+
 tar \
-  --disable-copyfile \
+  "${tar_args[@]}" \
   --exclude="./.git" \
   --exclude="./._*" \
   --exclude="./.DS_Store" \
