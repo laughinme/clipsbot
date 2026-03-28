@@ -1,3 +1,73 @@
+x-worker-common: &worker-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+    args:
+      INSTALL_FFMPEG: "true"
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+  env_file:
+    - ./backend/.env
+  environment: &worker-common-env
+    APP_STAGE: dev
+    DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
+    REDIS_URL: redis://redis:6379/0
+    RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/?heartbeat=600
+    STORAGE_ENDPOINT_INTERNAL: http://minio:9000
+    STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
+    STORAGE_REGION: us-east-1
+    STORAGE_ACCESS_KEY: minioadmin
+    STORAGE_SECRET_KEY: minioadmin
+    STORAGE_PUBLIC_BUCKET: media-public
+    STORAGE_PRIVATE_BUCKET: media-private
+    STORAGE_CLIPS_BUCKET: clips
+    STORAGE_ARCHIVE_BUCKET: media-private
+    STORAGE_USE_PATH_STYLE: "true"
+    ARCHIVE_IMPORT_HOST_ROOT: ${ARCHIVE_IMPORT_HOST_ROOT:-}
+    ARCHIVE_IMPORT_CONTAINER_ROOT: ${ARCHIVE_IMPORT_CONTAINER_ROOT:-/imports}
+    ARCHIVE_IMPORT_ALLOWED_ROOTS: ${ARCHIVE_IMPORT_ALLOWED_ROOTS:-/imports}
+    EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-stub}
+    GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2-preview}
+    GEMINI_SUMMARY_MODEL: ${GEMINI_SUMMARY_MODEL:-gemini-2.5-flash}
+    EMBEDDING_VECTOR_SIZE: ${EMBEDDING_VECTOR_SIZE:-3072}
+    OCR_PROVIDER: ${OCR_PROVIDER:-stub}
+    TRANSCRIPT_PROVIDER: ${TRANSCRIPT_PROVIDER:-stub}
+    SUMMARY_PROVIDER: ${SUMMARY_PROVIDER:-stub}
+    GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+    GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-global}
+    GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+    GCS_STAGING_BUCKET: ${GCS_STAGING_BUCKET:-}
+    GCS_STAGING_PREFIX: ${GCS_STAGING_PREFIX:-archive-staging}
+    GCS_STAGING_LOCATION: ${GCS_STAGING_LOCATION:-us-central1}
+    GCS_STAGING_AUTO_CREATE_BUCKET: ${GCS_STAGING_AUTO_CREATE_BUCKET:-false}
+    TRANSCRIPT_LANGUAGE_CODES: ${TRANSCRIPT_LANGUAGE_CODES:-ru-RU,en-US}
+    STT_SHORT_MODEL: ${STT_SHORT_MODEL:-latest_short}
+    STT_LONG_MODEL: ${STT_LONG_MODEL:-latest_long}
+    QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+    QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+    QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+    QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_corpus}
+    QDRANT_LOCAL_PATH: ${QDRANT_LOCAL_PATH:-}
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  depends_on:
+    db:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    minio:
+      condition: service_started
+    qdrant:
+      condition: service_started
+  volumes:
+    - ./backend/secrets:/app/secrets:ro
+    - "${ARCHIVE_IMPORT_HOST_ROOT:-/tmp}:${ARCHIVE_IMPORT_CONTAINER_ROOT:-/imports}:ro"
+    - "${GOOGLE_APPLICATION_CREDENTIALS_HOST:-/tmp/adc-missing.json}:/var/secrets/google/application_default_credentials.json:ro"
+  entrypoint: ["python", "-m", "worker.main"]
+  restart: unless-stopped
+
 services:
   backend:
     build:
@@ -6,6 +76,11 @@ services:
       args:
         INSTALL_FFMPEG: "false"
     container_name: backend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
     env_file:
       - ./backend/.env
     environment:
@@ -17,7 +92,7 @@ services:
       COOKIE_SAMESITE: "lax"
       DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
       REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/?heartbeat=600
       RABBITMQ_ENABLED: "true"
       STORAGE_ENDPOINT_INTERNAL: http://minio:9000
       STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
@@ -27,8 +102,34 @@ services:
       STORAGE_PUBLIC_BUCKET: media-public
       STORAGE_PRIVATE_BUCKET: media-private
       STORAGE_CLIPS_BUCKET: clips
+      STORAGE_ARCHIVE_BUCKET: media-private
       STORAGE_PRESIGN_EXPIRES_SEC: 600
       STORAGE_USE_PATH_STYLE: "true"
+      ARCHIVE_IMPORT_HOST_ROOT: ${ARCHIVE_IMPORT_HOST_ROOT:-}
+      ARCHIVE_IMPORT_CONTAINER_ROOT: ${ARCHIVE_IMPORT_CONTAINER_ROOT:-/imports}
+      ARCHIVE_IMPORT_ALLOWED_ROOTS: ${ARCHIVE_IMPORT_ALLOWED_ROOTS:-/imports}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-stub}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2-preview}
+      GEMINI_SUMMARY_MODEL: ${GEMINI_SUMMARY_MODEL:-gemini-2.5-flash}
+      EMBEDDING_VECTOR_SIZE: ${EMBEDDING_VECTOR_SIZE:-3072}
+      OCR_PROVIDER: ${OCR_PROVIDER:-stub}
+      TRANSCRIPT_PROVIDER: ${TRANSCRIPT_PROVIDER:-stub}
+      SUMMARY_PROVIDER: ${SUMMARY_PROVIDER:-stub}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-global}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GCS_STAGING_BUCKET: ${GCS_STAGING_BUCKET:-}
+      GCS_STAGING_PREFIX: ${GCS_STAGING_PREFIX:-archive-staging}
+      GCS_STAGING_LOCATION: ${GCS_STAGING_LOCATION:-us-central1}
+      GCS_STAGING_AUTO_CREATE_BUCKET: ${GCS_STAGING_AUTO_CREATE_BUCKET:-false}
+      TRANSCRIPT_LANGUAGE_CODES: ${TRANSCRIPT_LANGUAGE_CODES:-ru-RU,en-US}
+      STT_SHORT_MODEL: ${STT_SHORT_MODEL:-latest_short}
+      STT_LONG_MODEL: ${STT_LONG_MODEL:-latest_long}
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_corpus}
+      QDRANT_LOCAL_PATH: ${QDRANT_LOCAL_PATH:-}
       # WEBAPP_URL: http://localhost/admin
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-clips}
@@ -42,48 +143,60 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - ./backend/secrets:/app/secrets:ro
+      - "${ARCHIVE_IMPORT_HOST_ROOT:-/tmp}:${ARCHIVE_IMPORT_CONTAINER_ROOT:-/imports}:ro"
+      - "${GOOGLE_APPLICATION_CREDENTIALS_HOST:-/tmp/adc-missing.json}:/var/secrets/google/application_default_credentials.json:ro"
     ports:
       - "8080:8080"
     restart: unless-stopped
 
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        INSTALL_FFMPEG: "true"
-    container_name: worker
-    env_file:
-      - ./backend/.env
+  worker-sync:
+    <<: *worker-common
     environment:
-      APP_STAGE: dev
-      DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      STORAGE_ENDPOINT_INTERNAL: http://minio:9000
-      STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
-      STORAGE_REGION: us-east-1
-      STORAGE_ACCESS_KEY: minioadmin
-      STORAGE_SECRET_KEY: minioadmin
-      STORAGE_PUBLIC_BUCKET: media-public
-      STORAGE_PRIVATE_BUCKET: media-private
-      STORAGE_CLIPS_BUCKET: clips
-      STORAGE_USE_PATH_STYLE: "true"
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-    depends_on:
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    volumes:
-      - ./backend/secrets:/app/secrets:ro
-    entrypoint: ["python", "-m", "worker.main"]
-    restart: unless-stopped
+      <<: *worker-common-env
+      WORKER_QUEUE_NAMES: archive.syncs,maintenance.jobs
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.5'
+
+  worker-index:
+    <<: *worker-common
+    environment:
+      <<: *worker-common-env
+      WORKER_QUEUE_NAMES: archive.indexing,archive.enrichment
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+
+  worker-clips:
+    <<: *worker-common
+    environment:
+      <<: *worker-common-env
+      WORKER_QUEUE_NAMES: clips.process
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
+
+  worker:
+    <<: *worker-common
+    profiles: ["legacy"]
+    environment:
+      <<: *worker-common-env
+      WORKER_QUEUE_NAMES: ""
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '3.0'
 
   scheduler:
     build:
@@ -98,7 +211,7 @@ services:
       APP_STAGE: dev
       DATABASE_URL: postgresql+asyncpg://postgres:secret@db:5432/templatepg
       REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/?heartbeat=600
       STORAGE_ENDPOINT_INTERNAL: http://minio:9000
       STORAGE_ENDPOINT_PUBLIC: ${SITE_URL:-http://localhost}
       STORAGE_REGION: us-east-1
@@ -107,12 +220,38 @@ services:
       STORAGE_PUBLIC_BUCKET: media-public
       STORAGE_PRIVATE_BUCKET: media-private
       STORAGE_CLIPS_BUCKET: clips
+      STORAGE_ARCHIVE_BUCKET: media-private
       STORAGE_USE_PATH_STYLE: "true"
+      ARCHIVE_IMPORT_ALLOWED_ROOTS: ${ARCHIVE_IMPORT_ALLOWED_ROOTS:-/imports}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-stub}
+      EMBEDDING_VECTOR_SIZE: ${EMBEDDING_VECTOR_SIZE:-3072}
+      OCR_PROVIDER: ${OCR_PROVIDER:-stub}
+      TRANSCRIPT_PROVIDER: ${TRANSCRIPT_PROVIDER:-stub}
+      SUMMARY_PROVIDER: ${SUMMARY_PROVIDER:-stub}
+      GEMINI_SUMMARY_MODEL: ${GEMINI_SUMMARY_MODEL:-gemini-2.5-flash}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-global}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GCS_STAGING_BUCKET: ${GCS_STAGING_BUCKET:-}
+      GCS_STAGING_PREFIX: ${GCS_STAGING_PREFIX:-archive-staging}
+      GCS_STAGING_LOCATION: ${GCS_STAGING_LOCATION:-us-central1}
+      GCS_STAGING_AUTO_CREATE_BUCKET: ${GCS_STAGING_AUTO_CREATE_BUCKET:-false}
+      TRANSCRIPT_LANGUAGE_CODES: ${TRANSCRIPT_LANGUAGE_CODES:-ru-RU,en-US}
+      STT_SHORT_MODEL: ${STT_SHORT_MODEL:-latest_short}
+      STT_LONG_MODEL: ${STT_LONG_MODEL:-latest_long}
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_corpus}
+      QDRANT_LOCAL_PATH: ${QDRANT_LOCAL_PATH:-}
     depends_on:
       rabbitmq:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - ./backend/secrets:/app/secrets:ro
+      - "${GOOGLE_APPLICATION_CREDENTIALS_HOST:-/tmp/adc-missing.json}:/var/secrets/google/application_default_credentials.json:ro"
     entrypoint: ["python", "-m", "scheduler.main"]
     restart: unless-stopped
 
@@ -128,7 +267,7 @@ services:
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-clips}
       INTERNAL_BACKEND_URL: http://backend:8080/api/v1/internal
       INTERNAL_BOT_TOKEN: ${INTERNAL_BOT_TOKEN:-change-me-internal-bot-token}
-      # WEBAPP_URL: http://localhost/admin
+      WEBAPP_URL: ${WEBAPP_URL:-}
     depends_on:
       backend:
         condition: service_started
@@ -159,13 +298,32 @@ services:
       dockerfile: nginx/Dockerfile
     container_name: nginx
     ports:
-      - "80:80"
+      - "${NGINX_HTTP_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_started
       frontend:
         condition: service_started
       minio:
+        condition: service_started
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["edge"]
+    container_name: caddy
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-}
+      CADDY_EMAIL: ${CADDY_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      nginx:
         condition: service_started
     restart: unless-stopped
 
@@ -185,6 +343,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
 
   redis:
     image: redis:8-alpine
@@ -198,18 +361,31 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
 
   rabbitmq:
     image: rabbitmq:4-management
     ports:
       - "5672:5672"
       - "15672:15672"
+    volumes:
+      - ./rabbitmq/conf.d/20-heartbeat.conf:/etc/rabbitmq/conf.d/20-heartbeat.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
 
   minio:
     image: minio/minio
@@ -223,6 +399,11 @@ services:
     volumes:
       - minio_data:/data
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.5'
 
   minio-init:
     image: minio/mc
@@ -242,7 +423,25 @@ services:
         echo 'MinIO buckets are ready';
     restart: "no"
 
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '2.0'
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  qdrant_data:
+  rabbitmq_data:
+  caddy_data:
+  caddy_config:
