@@ -24,6 +24,24 @@ class Settings(BaseSettings):
     SQL_ECHO: bool = False
     SCHEDULER_ENABLED: bool = False
     RABBITMQ_ENABLED: bool = True
+    WORKER_PREFETCH_COUNT: int = 1
+    WORKER_QUEUE_NAMES: str = ""
+    TEXT_EMBED_BATCH_SIZE: int = 64
+    PHOTO_EMBED_BATCH_SIZE: int = 4
+    VOICE_EMBED_BATCH_SIZE: int = 2
+    EMBEDDING_REQUEST_CONCURRENCY: int = 4
+    EMBEDDING_REQUEST_MAX_RETRIES: int = 3
+    EMBEDDING_REQUEST_TIMEOUT_SEC: int = 90
+    SUMMARY_REQUEST_TIMEOUT_SEC: int = 90
+    OCR_REQUEST_TIMEOUT_SEC: int = 90
+    TRANSCRIPT_REQUEST_TIMEOUT_SEC: int = 900
+    ARCHIVE_STARTUP_RECOVERY_OLDER_THAN_MINUTES: int = 2
+    ARCHIVE_STALE_PROCESSING_MINUTES: int = 30
+    ARCHIVE_ENRICHMENT_STALE_PROCESSING_MINUTES: int = 30
+    ARCHIVE_AUTO_ENRICH_ON_SYNC: bool = False
+    DB_POOL_SIZE: int = 12
+    DB_MAX_OVERFLOW: int = 12
+    DB_POOL_TIMEOUT_SEC: int = 30
 
     # API settings
     API_PORT: int = 8080
@@ -46,9 +64,39 @@ class Settings(BaseSettings):
     STORAGE_PUBLIC_BUCKET: str = "media-public"
     STORAGE_PRIVATE_BUCKET: str = "media-private"
     STORAGE_CLIPS_BUCKET: str = "clips"
+    STORAGE_ARCHIVE_BUCKET: str = "media-private"
     STORAGE_PRESIGN_EXPIRES_SEC: int = 600
     STORAGE_USE_PATH_STYLE: bool = True
     STORAGE_AUTO_CREATE_BUCKETS: bool = True
+
+    # Archive import path mapping
+    ARCHIVE_IMPORT_HOST_ROOT: str = ""
+    ARCHIVE_IMPORT_CONTAINER_ROOT: str = ""
+    ARCHIVE_IMPORT_ALLOWED_ROOTS: str = ""
+
+    # Embeddings / vector search
+    EMBEDDING_PROVIDER: Literal["stub", "vertex"] = "stub"
+    GOOGLE_CLOUD_PROJECT: str = ""
+    GOOGLE_CLOUD_LOCATION: str = "global"
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-2-preview"
+    GEMINI_SUMMARY_MODEL: str = "gemini-2.5-flash"
+    EMBEDDING_VECTOR_SIZE: int = 3072
+    OCR_PROVIDER: Literal["stub", "vision"] = "stub"
+    TRANSCRIPT_PROVIDER: Literal["stub", "speech_v2"] = "stub"
+    SUMMARY_PROVIDER: Literal["stub", "vertex"] = "stub"
+    GCS_STAGING_BUCKET: str = ""
+    GCS_STAGING_PREFIX: str = "archive-staging"
+    GCS_STAGING_LOCATION: str = "us-central1"
+    GCS_STAGING_AUTO_CREATE_BUCKET: bool = False
+    TRANSCRIPT_LANGUAGE_CODES: str = "ru-RU,en-US"
+    STT_SHORT_MODEL: str = "latest_short"
+    STT_LONG_MODEL: str = "latest_long"
+    QDRANT_ENABLED: bool = True
+    QDRANT_URL: str = "http://qdrant:6333"
+    QDRANT_API_KEY: str = ""
+    QDRANT_COLLECTION: str = "knowledge_corpus"
+    QDRANT_LOCAL_PATH: str = ""
 
     # Optional notifications adapter
     NOTIFICATIONS_PROVIDER: Literal["noop", "telegram"] = "noop"
@@ -85,6 +133,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str
     RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
+    RABBITMQ_HEARTBEAT_SEC: int = 600
 
     @field_validator("COOKIE_SAMESITE", mode="before")
     @classmethod
@@ -122,6 +171,22 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
         return value.rstrip("/")
+
+    @field_validator(
+        "ARCHIVE_IMPORT_HOST_ROOT",
+        "ARCHIVE_IMPORT_CONTAINER_ROOT",
+        "ARCHIVE_IMPORT_ALLOWED_ROOTS",
+        "QDRANT_URL",
+        "QDRANT_LOCAL_PATH",
+        "GCS_STAGING_BUCKET",
+        "GCS_STAGING_PREFIX",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_paths(cls, value: str | None) -> str:
+        if value is None:
+            return ""
+        return str(value).strip().rstrip("/")
 
     @field_validator("AUTH_DEFAULT_ROLE_SLUG", mode="before")
     @classmethod
@@ -171,6 +236,47 @@ class Settings(BaseSettings):
             values.append(int(candidate))
         return values
 
+    @property
+    def archive_import_allowed_roots(self) -> list[Path]:
+        values: list[Path] = []
+        if self.ARCHIVE_IMPORT_ALLOWED_ROOTS:
+            parts = self.ARCHIVE_IMPORT_ALLOWED_ROOTS.split(",")
+        elif self.ARCHIVE_IMPORT_CONTAINER_ROOT:
+            parts = [self.ARCHIVE_IMPORT_CONTAINER_ROOT]
+        else:
+            parts = []
+
+        for part in parts:
+            candidate = str(part).strip()
+            if candidate:
+                values.append(Path(candidate).expanduser().resolve())
+        return values
+
+    @property
+    def worker_queue_names(self) -> set[str]:
+        return {
+            candidate
+            for candidate in (part.strip() for part in self.WORKER_QUEUE_NAMES.split(","))
+            if candidate
+        }
+
+    @property
+    def transcript_language_codes(self) -> list[str]:
+        return [
+            candidate
+            for candidate in (part.strip() for part in self.TRANSCRIPT_LANGUAGE_CODES.split(","))
+            if candidate
+        ]
+
+    @property
+    def gcs_staging_bucket_name(self) -> str:
+        if self.GCS_STAGING_BUCKET:
+            return self.GCS_STAGING_BUCKET
+        project = self.GOOGLE_CLOUD_PROJECT.strip().lower().replace("_", "-")
+        if not project:
+            return ""
+        return f"{project}-clipsbot-archive-staging"
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -184,6 +290,21 @@ def clear_settings_cache() -> None:
         clear_media_storage_service_cache()
     except Exception:
         # Media storage service may be unavailable during bootstrap/import phases.
+        pass
+    try:
+        from integrations.embeddings import clear_embedding_provider_cache
+        clear_embedding_provider_cache()
+    except Exception:
+        pass
+    try:
+        from integrations.qdrant import clear_qdrant_service_cache
+        clear_qdrant_service_cache()
+    except Exception:
+        pass
+    try:
+        from integrations.gcs_staging import clear_gcs_staging_service_cache
+        clear_gcs_staging_service_cache()
+    except Exception:
         pass
 
 
