@@ -1,0 +1,2 @@
+from .enrichment_jobs_interface import EnrichmentJobInterface
+from .enrichment_jobs_table import EnrichmentJob
