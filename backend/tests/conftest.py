@@ -37,10 +37,15 @@ os.environ.setdefault("STORAGE_PUBLIC_BUCKET", "media-public")
 os.environ.setdefault("STORAGE_PRIVATE_BUCKET", "media-private")
 os.environ.setdefault("STORAGE_USE_PATH_STYLE", "true")
 os.environ.setdefault("STORAGE_AUTO_CREATE_BUCKETS", "false")
+os.environ.setdefault("STORAGE_ARCHIVE_BUCKET", "media-private")
 os.environ.setdefault("JWT_PRIVATE_KEY_PATH", str(SECRETS_DIR / "jwt_private_key.pem"))
 os.environ.setdefault("JWT_PUBLIC_KEY_PATH", str(SECRETS_DIR / "jwt_public_key.pem"))
 os.environ.setdefault("SCHEDULER_ENABLED", "false")
 os.environ.setdefault("RABBITMQ_ENABLED", "false")
+os.environ.setdefault("QDRANT_ENABLED", "true")
+os.environ.setdefault("QDRANT_LOCAL_PATH", ":memory:")
+os.environ.setdefault("QDRANT_COLLECTION", "knowledge_corpus")
+os.environ.setdefault("EMBEDDING_PROVIDER", "stub")
 
 from core.config import clear_settings_cache
 
@@ -143,7 +148,13 @@ async def _integration_state(
     await dispose_engine()
     engine = get_engine()
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE clip_aliases, clips, user_roles, users RESTART IDENTITY CASCADE"))
+        await conn.execute(
+            text(
+                "TRUNCATE TABLE indexing_jobs, corpus_projections, corpus_assets, corpus_items, sync_runs, source_connections, "
+                "clip_aliases, clips, uploader_invites, browser_login_challenges, user_roles, users "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
 
     await redis_client.flushdb()
     yield
