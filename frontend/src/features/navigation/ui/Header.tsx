@@ -35,6 +35,14 @@ export function Header() {
                     <nav className="hidden md:flex gap-6">
                         <motion.div whileHover={{ y: -1 }}>
                             <Link
+                                href="/archive"
+                                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                            >
+                                {t("header.archive")}
+                            </Link>
+                        </motion.div>
+                        <motion.div whileHover={{ y: -1 }}>
+                            <Link
                                 href="/catalog"
                                 className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                             >
@@ -55,6 +63,14 @@ export function Header() {
                 </div>
 
                 <div className="flex items-center gap-4">
+                    <motion.div className="md:hidden" whileHover={{ y: -1 }}>
+                        <Link
+                            href="/archive"
+                            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                            {t("header.archive")}
+                        </Link>
+                    </motion.div>
                     <motion.div className="md:hidden" whileHover={{ y: -1 }}>
                         <Link
                             href="/catalog"

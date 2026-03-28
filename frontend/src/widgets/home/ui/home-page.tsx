@@ -37,28 +37,38 @@ export default function HomePage() {
                   <Link href="/catalog">{t("home.openCatalog")}</Link>
                 </Button>
                 <Button asChild size="lg" variant="outline">
+                  <Link href="/archive">{t("home.openArchive")}</Link>
+                </Button>
+                <Button asChild size="lg" variant="outline">
                   <Link href="/admin">{t("home.openAdmin")}</Link>
                 </Button>
               </div>
             </div>
-            <Card className="border-border/60 bg-card/80 p-6 shadow-sm">
-              <p className="mb-4 text-sm font-semibold text-muted-foreground">{t("home.latestClips")}</p>
-              <div className="space-y-4">
-                {clips.slice(0, 5).map((clip) => (
-                  <div key={clip.id} className="rounded-lg border border-border/60 p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="font-semibold">{clip.title}</p>
-                        {clip.description && (
-                          <p className="mt-1 text-sm text-muted-foreground">{clip.description}</p>
-                        )}
+            <div className="grid gap-4">
+              <Card className="border-border/60 bg-card/80 p-6 shadow-sm">
+                <p className="mb-2 text-sm font-semibold text-muted-foreground">{t("home.archiveCardEyebrow")}</p>
+                <h2 className="text-2xl font-black tracking-tight">{t("home.archiveCardTitle")}</h2>
+                <p className="mt-3 text-sm text-muted-foreground">{t("home.archiveCardBody")}</p>
+              </Card>
+              <Card className="border-border/60 bg-card/80 p-6 shadow-sm">
+                <p className="mb-4 text-sm font-semibold text-muted-foreground">{t("home.latestClips")}</p>
+                <div className="space-y-4">
+                  {clips.slice(0, 5).map((clip) => (
+                    <div key={clip.id} className="rounded-lg border border-border/60 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="font-semibold">{clip.title}</p>
+                          {clip.description && (
+                            <p className="mt-1 text-sm text-muted-foreground">{clip.description}</p>
+                          )}
+                        </div>
+                        <span className="text-xs uppercase text-muted-foreground">{clip.status}</span>
                       </div>
-                      <span className="text-xs uppercase text-muted-foreground">{clip.status}</span>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
+                  ))}
+                </div>
+              </Card>
+            </div>
           </div>
         </section>
       </main>

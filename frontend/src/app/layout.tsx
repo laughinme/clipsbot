@@ -7,7 +7,7 @@ import "@/app/styles/index.css";
 
 export const metadata: Metadata = {
   title: "ClipsBot",
-  description: "Telegram inline audio catalog and admin studio.",
+  description: "Telegram clips catalog, admin studio, and archive semantic search.",
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
