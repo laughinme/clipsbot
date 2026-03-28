@@ -23,6 +23,7 @@ def get_media_storage_service() -> MediaStorageService:
         public_bucket=settings.STORAGE_PUBLIC_BUCKET,
         private_bucket=settings.STORAGE_PRIVATE_BUCKET,
         clips_bucket=settings.STORAGE_CLIPS_BUCKET,
+        archive_bucket=settings.STORAGE_ARCHIVE_BUCKET,
     )
 
 

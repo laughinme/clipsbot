@@ -71,6 +71,7 @@ class MediaStorageService:
         public_bucket: str,
         private_bucket: str,
         clips_bucket: str,
+        archive_bucket: str,
     ) -> None:
         self.public_endpoint = public_endpoint.rstrip("/")
         self.region = region
@@ -78,6 +79,7 @@ class MediaStorageService:
         self.public_bucket = public_bucket
         self.private_bucket = private_bucket
         self.clips_bucket = clips_bucket
+        self.archive_bucket = archive_bucket
 
         s3_config = Config(
             signature_version="s3v4",
@@ -113,6 +115,42 @@ class MediaStorageService:
         if ext != ".mp3":
             ext = ".mp3"
         return f"clips/{clip_id}/{uuid4().hex}{ext}"
+
+    def build_archive_manifest_key(self, import_id: UUID | str, filename: str = "result.json") -> str:
+        ext = Path(filename).suffix.lower() or ".json"
+        return f"telegram/imports/{import_id}/manifest/result{ext}"
+
+    def build_source_manifest_key(
+        self,
+        source_slug: str,
+        sync_run_id: UUID | str,
+        filename: str = "result.json",
+    ) -> str:
+        ext = Path(filename).suffix.lower() or ".json"
+        safe_slug = Path(source_slug).name.replace(" ", "-")
+        return f"knowledge/sources/{safe_slug}/syncs/{sync_run_id}/manifest/result{ext}"
+
+    def build_archive_media_key(
+        self,
+        import_id: UUID | str,
+        message_type: str,
+        sha256: str,
+        filename: str,
+    ) -> str:
+        safe_name = Path(filename).name or f"{sha256}.bin"
+        return f"telegram/media/{import_id}/{message_type}/{sha256}_{safe_name}"
+
+    def build_corpus_asset_key(
+        self,
+        *,
+        source_slug: str,
+        content_type: str,
+        sha256: str,
+        filename: str,
+    ) -> str:
+        safe_slug = Path(source_slug).name.replace(" ", "-")
+        safe_name = Path(filename).name or f"{sha256}.bin"
+        return f"knowledge/assets/{safe_slug}/{content_type}/{sha256}_{safe_name}"
 
     def create_presigned_upload_url(
         self,
@@ -185,6 +223,7 @@ class MediaStorageService:
         self.ensure_bucket(self.public_bucket)
         self.ensure_bucket(self.private_bucket)
         self.ensure_bucket(self.clips_bucket)
+        self.ensure_bucket(self.archive_bucket)
 
     def check_health(self) -> None:
         """Raise an exception if storage is unreachable or buckets are missing."""
@@ -192,6 +231,7 @@ class MediaStorageService:
         self._internal_client.head_bucket(Bucket=self.public_bucket)
         self._internal_client.head_bucket(Bucket=self.private_bucket)
         self._internal_client.head_bucket(Bucket=self.clips_bucket)
+        self._internal_client.head_bucket(Bucket=self.archive_bucket)
 
     def put_object_bytes(
         self,
@@ -211,6 +251,22 @@ class MediaStorageService:
     def get_object_bytes(self, *, bucket: str, key: str) -> bytes:
         response = self._internal_client.get_object(Bucket=bucket, Key=key)
         return response["Body"].read()
+
+    def put_object_file(
+        self,
+        *,
+        bucket: str,
+        key: str,
+        path: str | Path,
+        content_type: str | None = None,
+    ) -> None:
+        extra_args = {"ContentType": content_type} if content_type else None
+        self._internal_client.upload_file(
+            str(Path(path)),
+            bucket,
+            key,
+            ExtraArgs=extra_args or {},
+        )
 
     def delete_prefix(self, *, bucket: str, prefix: str) -> int:
         deleted_count = 0
