@@ -19,7 +19,10 @@ class BrokerPublisher:
         if not self.settings.RABBITMQ_ENABLED:
             return
 
-        connection = await connect_robust(self.settings.RABBITMQ_URL)
+        connection = await connect_robust(
+            self.settings.RABBITMQ_URL,
+            heartbeat=self.settings.RABBITMQ_HEARTBEAT_SEC,
+        )
         async with connection:
             channel = await connection.channel()
             await ensure_topology(channel)
@@ -33,6 +36,35 @@ class BrokerPublisher:
                 ),
                 routing_key=routing_key,
             )
+
+    async def publish_queue_message(self, queue_name: str, payload: dict[str, Any]) -> None:
+        await self.publish_queue_messages(queue_name, [payload])
+
+    async def publish_queue_messages(
+        self,
+        queue_name: str,
+        payloads: list[dict[str, Any]],
+    ) -> None:
+        if not self.settings.RABBITMQ_ENABLED or not payloads:
+            return
+
+        connection = await connect_robust(
+            self.settings.RABBITMQ_URL,
+            heartbeat=self.settings.RABBITMQ_HEARTBEAT_SEC,
+        )
+        async with connection:
+            channel = await connection.channel()
+            await ensure_topology(channel)
+            for payload in payloads:
+                body = json.dumps(payload).encode("utf-8")
+                await channel.default_exchange.publish(
+                    Message(
+                        body=body,
+                        content_type="application/json",
+                        delivery_mode=DeliveryMode.PERSISTENT,
+                    ),
+                    routing_key=queue_name,
+                )
 
 
 def get_broker_publisher(
