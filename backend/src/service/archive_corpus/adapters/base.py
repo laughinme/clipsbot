@@ -55,6 +55,7 @@ class ScannedSyncRun:
 class ScannedSyncBatch:
     manifest_path: Path
     items: list[NormalizedSourceItem]
+    next_cursor: str | None = None
 
 
 class SourceAdapter(ABC):

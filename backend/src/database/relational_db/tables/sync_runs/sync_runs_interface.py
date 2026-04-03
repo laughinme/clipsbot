@@ -29,12 +29,25 @@ class SyncRunInterface:
         )
         return list(rows.all())
 
+    async def list_by_statuses(self, statuses: list[str], *, limit: int = 100) -> list[SyncRun]:
+        if not statuses:
+            return []
+        rows = await self.session.scalars(
+            select(SyncRun)
+            .where(SyncRun.status.in_(statuses))
+            .order_by(desc(SyncRun.updated_at))
+            .limit(limit)
+        )
+        return list(rows.all())
+
     async def list_stuck_by_status(self, *, status: str, older_than_minutes: int) -> list[SyncRun]:
         threshold = datetime.now(UTC) - timedelta(minutes=older_than_minutes)
+        heartbeat_column = SyncRun.scan_heartbeat_at if status == "scanning" else SyncRun.updated_at
         rows = await self.session.scalars(
             select(SyncRun).where(
                 SyncRun.status == status,
-                SyncRun.updated_at < threshold,
+                heartbeat_column.is_not(None),
+                heartbeat_column < threshold,
             )
         )
         return list(rows.all())

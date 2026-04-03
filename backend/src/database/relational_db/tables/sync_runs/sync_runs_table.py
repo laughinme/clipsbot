@@ -43,6 +43,7 @@ class SyncRun(TimestampMixin, Base):
     failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     skipped_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     source: Mapped["SourceConnection"] = relationship("SourceConnection", back_populates="sync_runs", lazy="selectin")

@@ -387,12 +387,18 @@ class ArchiveEnrichmentService:
         if run is None:
             raise NotFoundError("Archive enrichment run not found.")
 
-        jobs = await self.enrichment_job_repo.list_for_run(run.id)
-        run.total_items = max(run.total_items, len(jobs))
-        run.queued_items = sum(1 for job in jobs if job.status == EnrichmentStatus.QUEUED.value)
-        run.processing_items = sum(1 for job in jobs if job.status == EnrichmentStatus.PROCESSING.value)
-        run.completed_items = sum(1 for job in jobs if job.status == EnrichmentStatus.COMPLETED.value)
-        run.failed_items = sum(1 for job in jobs if job.status == EnrichmentStatus.FAILED.value)
+        counts = await self.enrichment_job_repo.get_run_status_counts(run.id)
+        observed_total = (
+            counts["queued_items"]
+            + counts["processing_items"]
+            + counts["completed_items"]
+            + counts["failed_items"]
+        )
+        run.total_items = max(run.total_items, observed_total)
+        run.queued_items = counts["queued_items"]
+        run.processing_items = counts["processing_items"]
+        run.completed_items = counts["completed_items"]
+        run.failed_items = counts["failed_items"]
 
         if run.queued_items == 0 and run.processing_items == 0:
             run.status = (
@@ -683,7 +689,6 @@ class ArchiveEnrichmentService:
                 await self.broker.publish_queue_messages(ARCHIVE_ENRICH_QUEUE, followup_enrichment_payloads)
             if projection_payloads:
                 await self.broker.publish_queue_messages(ARCHIVE_INDEX_QUEUE, projection_payloads)
-            await self.refresh_enrichment_run_status(job.enrichment_run.id)
         except Exception as exc:
             await self.uow.session.rollback()
             failed = await self.enrichment_job_repo.get_by_id(job_id)
@@ -707,6 +712,4 @@ class ArchiveEnrichmentService:
             failed.last_error = str(exc)
             failed.completed_at = datetime.now(UTC)
             await self.uow.commit()
-            if failed.enrichment_run_id:
-                await self.refresh_enrichment_run_status(failed.enrichment_run_id)
             raise

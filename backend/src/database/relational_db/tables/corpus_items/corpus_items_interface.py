@@ -68,6 +68,21 @@ class CorpusItemInterface:
         by_id = {item.id: item for item in found}
         return [by_id[item_id] for item_id in ids if item_id in by_id]
 
+    async def list_by_source_and_external_keys(
+        self,
+        source_id: UUID | str,
+        external_keys: list[str],
+    ) -> dict[str, CorpusItem]:
+        normalized_keys = [key for key in dict.fromkeys(external_keys) if key]
+        if not normalized_keys:
+            return {}
+        stmt = select(CorpusItem).where(
+            CorpusItem.source_id == source_id,
+            CorpusItem.external_key.in_(normalized_keys),
+        )
+        rows = await self.session.scalars(stmt)
+        return {item.external_key: item for item in rows.all()}
+
     async def mark_not_seen_in_full_snapshot(
         self,
         *,

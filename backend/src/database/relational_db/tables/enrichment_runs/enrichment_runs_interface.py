@@ -30,3 +30,14 @@ class EnrichmentRunInterface:
             .limit(limit)
         )
         return list(rows.all())
+
+    async def list_by_statuses(self, statuses: list[str], *, limit: int = 100) -> list[EnrichmentRun]:
+        if not statuses:
+            return []
+        rows = await self.session.scalars(
+            select(EnrichmentRun)
+            .where(EnrichmentRun.status.in_(statuses))
+            .order_by(desc(EnrichmentRun.updated_at))
+            .limit(limit)
+        )
+        return list(rows.all())

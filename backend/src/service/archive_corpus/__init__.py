@@ -1,5 +1,3 @@
-from functools import lru_cache
-
 from fastapi import Depends
 
 from broker import BrokerPublisher, get_broker_publisher
@@ -22,7 +20,6 @@ from .adapters.telegram_desktop_export import TelegramDesktopExportAdapter
 from .source_service import ArchiveSourceService
 
 
-@lru_cache(maxsize=1)
 def get_source_adapter_registry() -> SourceAdapterRegistry:
     settings = get_settings()
     return SourceAdapterRegistry(

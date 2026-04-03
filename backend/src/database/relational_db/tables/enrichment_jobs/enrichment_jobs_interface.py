@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -72,6 +72,28 @@ class EnrichmentJobInterface:
             .order_by(EnrichmentJob.created_at.asc())
         )
         return list(rows.all())
+
+    async def get_run_status_counts(self, enrichment_run_id: UUID | str) -> dict[str, int]:
+        queued_expr = func.sum(case((EnrichmentJob.status == "queued", 1), else_=0))
+        processing_expr = func.sum(case((EnrichmentJob.status == "processing", 1), else_=0))
+        done_expr = func.sum(case((EnrichmentJob.status == "completed", 1), else_=0))
+        failed_expr = func.sum(case((EnrichmentJob.status == "failed", 1), else_=0))
+
+        row = await self.session.execute(
+            select(
+                queued_expr.label("queued_items"),
+                processing_expr.label("processing_items"),
+                done_expr.label("completed_items"),
+                failed_expr.label("failed_items"),
+            ).where(EnrichmentJob.enrichment_run_id == enrichment_run_id)
+        )
+        data = row.one()
+        return {
+            "queued_items": int(data.queued_items or 0),
+            "processing_items": int(data.processing_items or 0),
+            "completed_items": int(data.completed_items or 0),
+            "failed_items": int(data.failed_items or 0),
+        }
 
     async def list_stuck_processing(self, *, older_than_minutes: int = 30) -> list[EnrichmentJob]:
         threshold = datetime.now(UTC) - timedelta(minutes=older_than_minutes)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -26,6 +27,7 @@ from domain.archive import (
     ArchiveContentType,
     CorpusProjectionModel,
     ProjectionIndexStatus,
+    ProjectionKind,
     SourceConnectionModel,
     SourceCreateRequest,
     SourceListResponse,
@@ -43,6 +45,8 @@ from service.archive_imports.parser import sha256_file
 
 from .adapters.base import NormalizedAsset, NormalizedSourceItem, SourceAdapterRegistry
 from service.archive_enrichments import ArchiveEnrichmentService
+
+logger = logging.getLogger(__name__)
 
 
 class ArchiveSourceService:
@@ -192,19 +196,7 @@ class ArchiveSourceService:
         if source is None:
             raise NotFoundError("Archive source not found.")
         sync_runs = await self.sync_run_repo.list_by_source(source_id, limit=limit)
-        items: list[SyncRunModel] = []
-        for sync_run in sync_runs:
-            status = await self.refresh_sync_status(sync_run.id)
-            refreshed = await self.sync_run_repo.get_by_id(status.sync_run_id)
-            if refreshed is not None:
-                items.append(
-                    self._sync_model(
-                        refreshed,
-                        queued_items=status.queued_items,
-                        processing_items=status.processing_items,
-                    )
-                )
-        return SyncRunListResponse(items=items)
+        return SyncRunListResponse(items=[self._sync_model(sync_run) for sync_run in sync_runs])
 
     async def get_sync_status(self, sync_run_id: UUID | str) -> SyncRunStatusResponse:
         return await self.refresh_sync_status(sync_run_id)
@@ -370,9 +362,10 @@ class ArchiveSourceService:
         source: SourceConnection,
         sync_run: SyncRun,
         normalized_item: NormalizedSourceItem,
+        existing: CorpusItem | None = None,
+        projection: CorpusProjection | None = None,
     ) -> dict[str, object]:
         now = datetime.now(UTC)
-        existing = await self.corpus_item_repo.get_by_source_and_external_key(source.id, normalized_item.external_key)
         queue_job: IndexingJob | None = None
         result_kind = "unchanged"
 
@@ -417,10 +410,11 @@ class ArchiveSourceService:
         existing.present_in_latest_sync = True
         existing.last_seen_at = now
         existing.last_seen_run_id = sync_run.id
-        projection = await self.corpus_projection_repo.get_by_corpus_item_and_kind(
-            existing.id,
-            normalized_item.projection_kind.value,
-        )
+        if projection is None:
+            projection = await self.corpus_projection_repo.get_by_corpus_item_and_kind(
+                existing.id,
+                normalized_item.projection_kind.value,
+            )
 
         if existing.content_hash == normalized_item.content_hash:
             needs_repair = (
@@ -485,17 +479,56 @@ class ArchiveSourceService:
         sync_run.status = SyncRunStatus.SCANNING.value
         if sync_run.started_at is None:
             sync_run.started_at = datetime.now(UTC)
+        sync_run.scan_heartbeat_at = datetime.now(UTC)
         sync_run.completed_at = None
         await self.uow.commit()
 
         upserted_item_ids: list[UUID] = []
         queued_any_index_jobs = False
         manifest_uploaded = False
-        sync_run.total_items = 0
-        sync_run.new_items = 0
-        sync_run.updated_items = 0
-        sync_run.unchanged_items = 0
-        sync_run.skipped_items = 0
+        resume_from_cursor = bool(sync_run.cursor)
+        if not resume_from_cursor:
+            sync_run.total_items = 0
+            sync_run.new_items = 0
+            sync_run.updated_items = 0
+            sync_run.unchanged_items = 0
+            sync_run.skipped_items = 0
+        last_progress_commit_at = datetime.now(UTC)
+        items_since_progress_commit = 0
+
+        async def flush_progress(
+            pending_payloads: list[tuple[int, dict[str, str]]],
+            *,
+            next_cursor: str | None = None,
+            force_log: bool = False,
+        ) -> None:
+            nonlocal last_progress_commit_at, items_since_progress_commit
+            if next_cursor is not None:
+                sync_run.cursor = next_cursor
+            sync_run.scan_heartbeat_at = datetime.now(UTC)
+            sync_run.updated_at = datetime.now(UTC)
+            await self.uow.commit()
+            if pending_payloads:
+                pending_payloads.sort(key=lambda item: item[0])
+                await self.broker.publish_queue_messages(
+                    ARCHIVE_INDEX_QUEUE,
+                    [payload for _, payload in pending_payloads],
+                )
+                pending_payloads.clear()
+            if force_log or items_since_progress_commit > 0:
+                logger.info(
+                    "Sync run %s heartbeat: total=%s new=%s updated=%s unchanged=%s skipped=%s indexed=%s failed=%s",
+                    sync_run.id,
+                    sync_run.total_items,
+                    sync_run.new_items,
+                    sync_run.updated_items,
+                    sync_run.unchanged_items,
+                    sync_run.skipped_items,
+                    sync_run.indexed_items,
+                    sync_run.failed_items,
+                )
+            last_progress_commit_at = datetime.now(UTC)
+            items_since_progress_commit = 0
 
         async for scanned_batch in adapter.iter_sync_run_batches(source=source, sync_run=sync_run):
             if not manifest_uploaded:
@@ -515,9 +548,29 @@ class ArchiveSourceService:
                 manifest_uploaded = True
 
             batch_queue_payloads: list[tuple[int, dict[str, str]]] = []
+            batch_items_by_external_key = await self.corpus_item_repo.list_by_source_and_external_keys(
+                source.id,
+                [item.external_key for item in scanned_batch.items],
+            )
+            batch_projections_by_item_id = await self.corpus_projection_repo.list_by_corpus_item_ids_and_kind(
+                [item.id for item in batch_items_by_external_key.values()],
+                ProjectionKind.RAW_MULTIMODAL.value,
+            )
             for normalized_item in scanned_batch.items:
                 sync_run.total_items += 1
-                upsert_result = await self._upsert_item(source=source, sync_run=sync_run, normalized_item=normalized_item)
+                existing_item = batch_items_by_external_key.get(normalized_item.external_key)
+                existing_projection = (
+                    batch_projections_by_item_id.get(existing_item.id)
+                    if existing_item is not None
+                    else None
+                )
+                upsert_result = await self._upsert_item(
+                    source=source,
+                    sync_run=sync_run,
+                    normalized_item=normalized_item,
+                    existing=existing_item,
+                    projection=existing_projection,
+                )
                 upserted_item_ids.append(upsert_result["item_id"])
                 result_kind = str(upsert_result["result_kind"])
                 projection_status = str(upsert_result["projection_status"])
@@ -534,6 +587,7 @@ class ArchiveSourceService:
                     sync_run.skipped_items += 1
 
                 if job is not None:
+                    queued_any_index_jobs = True
                     priority = {
                         ArchiveContentType.TEXT: 0,
                         ArchiveContentType.PHOTO: 1,
@@ -552,15 +606,17 @@ class ArchiveSourceService:
                             },
                         )
                     )
+                items_since_progress_commit += 1
 
-            queued_any_index_jobs = queued_any_index_jobs or bool(batch_queue_payloads)
-            await self.uow.commit()
-            if batch_queue_payloads:
-                batch_queue_payloads.sort(key=lambda item: item[0])
-                await self.broker.publish_queue_messages(
-                    ARCHIVE_INDEX_QUEUE,
-                    [payload for _, payload in batch_queue_payloads],
+                now = datetime.now(UTC)
+                heartbeat_due = (
+                    items_since_progress_commit >= self.settings.ARCHIVE_SYNC_PROGRESS_COMMIT_EVERY_ITEMS
+                    or (now - last_progress_commit_at).total_seconds() >= self.settings.ARCHIVE_SYNC_PROGRESS_HEARTBEAT_SECONDS
                 )
+                if heartbeat_due:
+                    await flush_progress(batch_queue_payloads, next_cursor=scanned_batch.next_cursor)
+
+            await flush_progress(batch_queue_payloads, next_cursor=scanned_batch.next_cursor, force_log=True)
 
         if sync_run.coverage_kind == SyncCoverageKind.FULL_SNAPSHOT.value:
             await self.corpus_item_repo.mark_not_seen_in_full_snapshot(
@@ -569,6 +625,8 @@ class ArchiveSourceService:
             )
 
         sync_run.status = SyncRunStatus.INDEXING.value if queued_any_index_jobs else SyncRunStatus.COMPLETED.value
+        sync_run.cursor = None
+        sync_run.scan_heartbeat_at = None
         if not queued_any_index_jobs:
             sync_run.completed_at = datetime.now(UTC)
 
@@ -591,3 +649,22 @@ class ArchiveSourceService:
             sync_run.completed_at = datetime.now(UTC)
         await self.uow.commit()
         return len(stale_runs)
+
+    async def requeue_stale_sync_runs(self, *, older_than_minutes: int) -> int:
+        stale_runs = await self.sync_run_repo.list_stuck_by_status(
+            status=SyncRunStatus.SCANNING.value,
+            older_than_minutes=older_than_minutes,
+        )
+        if not stale_runs:
+            return 0
+
+        payloads: list[dict[str, str]] = []
+        for sync_run in stale_runs:
+            sync_run.status = SyncRunStatus.CREATED.value
+            sync_run.scan_heartbeat_at = None
+            sync_run.completed_at = None
+            payloads.append({"sync_run_id": str(sync_run.id)})
+
+        await self.uow.commit()
+        await self.broker.publish_queue_messages(ARCHIVE_SYNC_QUEUE, payloads)
+        return len(payloads)

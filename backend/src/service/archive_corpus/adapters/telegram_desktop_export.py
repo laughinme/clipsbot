@@ -184,6 +184,12 @@ class TelegramDesktopExportAdapter(SourceAdapter):
         export_path = str(source.config_json.get("export_path") or "").strip()
         root_path, manifest_path = self._resolve_manifest_path(export_path)
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        cursor_offset = 0
+        if sync_run.cursor:
+            try:
+                cursor_offset = max(int(sync_run.cursor), 0)
+            except ValueError:
+                cursor_offset = 0
 
         include_types = self._normalize_content_types(sync_run.include_content_types)
         exclude_types = self._normalize_content_types(sync_run.exclude_content_types)
@@ -192,6 +198,8 @@ class TelegramDesktopExportAdapter(SourceAdapter):
         chat_title = payload.get("name")
 
         pending_batch: list[ParsedTelegramMessage] = []
+        pending_next_cursor: int | None = None
+
         async def _flush_pending() -> list[NormalizedSourceItem]:
             nonlocal pending_batch
             if not pending_batch:
@@ -210,7 +218,7 @@ class TelegramDesktopExportAdapter(SourceAdapter):
             pending_batch = []
             return [item for item in normalized_batch if item is not None]
 
-        for raw_message in raw_messages:
+        for raw_index, raw_message in enumerate(raw_messages[cursor_offset:], start=cursor_offset):
             parsed = parse_message(message=raw_message, chat_id=chat_id, chat_title=chat_title)
             if include_types and parsed.message_type.value not in include_types:
                 continue
@@ -220,15 +228,20 @@ class TelegramDesktopExportAdapter(SourceAdapter):
             if not self._should_include_by_sample(external_key=external_key, sample_percent=sync_run.sample_percent):
                 continue
             pending_batch.append(parsed)
+            pending_next_cursor = raw_index + 1
             if len(pending_batch) >= self._NORMALIZE_BATCH_SIZE:
+                current_cursor = pending_next_cursor
                 yield ScannedSyncBatch(
                     manifest_path=manifest_path,
                     items=await _flush_pending(),
+                    next_cursor=str(current_cursor) if current_cursor is not None else None,
                 )
 
         tail_batch = await _flush_pending()
         if tail_batch:
+            current_cursor = pending_next_cursor
             yield ScannedSyncBatch(
                 manifest_path=manifest_path,
                 items=tail_batch,
+                next_cursor=str(current_cursor) if current_cursor is not None else None,
             )

@@ -9,7 +9,9 @@ import { toast } from "sonner";
 
 import type {
   ArchiveContentType,
+  EnrichmentRun,
   EnrichmentRunStatusDto,
+  SyncRun,
   SourceConnection,
   SyncCoverageKind,
   SyncRunStatusDto,
@@ -18,8 +20,6 @@ import { Header } from "@/features/navigation/ui/Header";
 import { useAuth } from "@/app/providers/auth/useAuth";
 import {
   createArchiveSource,
-  getArchiveEnrichmentRunStatus,
-  getArchiveSyncStatus,
   listArchiveEnrichmentRuns,
   listArchiveSources,
   listArchiveSyncs,
@@ -50,6 +50,58 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const toSyncRunStatusDto = (sync: SyncRun, source?: SourceConnection): SyncRunStatusDto => {
+  const completedItems = Math.max(sync.total_items - sync.queued_items - sync.processing_items, 0);
+  const progress = sync.total_items > 0 ? Math.min(completedItems / sync.total_items, 1) : 0;
+
+  return {
+    sync_run_id: sync.id,
+    source_id: sync.source_id,
+    source_display_name: source?.display_name ?? sync.source_id,
+    source_kind: source?.kind ?? "custom",
+    status: sync.status,
+    coverage_kind: sync.coverage_kind,
+    total_items: sync.total_items,
+    new_items: sync.new_items,
+    updated_items: sync.updated_items,
+    unchanged_items: sync.unchanged_items,
+    queued_items: sync.queued_items,
+    processing_items: sync.processing_items,
+    indexed_items: sync.indexed_items,
+    failed_items: sync.failed_items,
+    skipped_items: sync.skipped_items,
+    progress,
+    started_at: sync.started_at,
+    completed_at: sync.completed_at,
+    created_at: sync.created_at,
+    updated_at: sync.updated_at,
+  };
+};
+
+const toEnrichmentRunStatusDto = (run: EnrichmentRun): EnrichmentRunStatusDto => {
+  const processedItems = run.completed_items + run.failed_items;
+  const progress = run.total_items > 0 ? Math.min(processedItems / run.total_items, 1) : 0;
+
+  return {
+    enrichment_run_id: run.id,
+    status: run.status,
+    source_ids: run.source_ids,
+    content_types: run.content_types,
+    present_in_latest_sync: run.present_in_latest_sync,
+    sample_percent: run.sample_percent,
+    total_items: run.total_items,
+    queued_items: run.queued_items,
+    processing_items: run.processing_items,
+    completed_items: run.completed_items,
+    failed_items: run.failed_items,
+    progress,
+    started_at: run.started_at,
+    completed_at: run.completed_at,
+    created_at: run.created_at,
+    updated_at: run.updated_at,
+  };
+};
+
 export default function ArchiveAdminPage() {
   const { t } = useI18n();
   const auth = useAuth();
@@ -70,7 +122,7 @@ export default function ArchiveAdminPage() {
     queryKey: ["archive-sources", "admin"],
     queryFn: listArchiveSources,
     enabled: isAdmin,
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   });
 
   const sourceIds = useMemo(() => (sourcesQuery.data ?? []).map((source) => source.id), [sourcesQuery.data]);
@@ -79,13 +131,11 @@ export default function ArchiveAdminPage() {
     queryKey: ["archive-syncs", ...sourceIds],
     enabled: isAdmin && sourceIds.length > 0,
     queryFn: async () => {
+      const sourceById = new Map((sourcesQuery.data ?? []).map((source) => [source.id, source]));
       const syncLists = await Promise.all(sourceIds.map((sourceId) => listArchiveSyncs(sourceId, 8)));
-      const entries = await Promise.all(
-        syncLists.flatMap((syncs) => syncs.map((sync) => getArchiveSyncStatus(sync.id))),
-      );
-      return entries;
+      return syncLists.flat().map((sync) => toSyncRunStatusDto(sync, sourceById.get(sync.source_id)));
     },
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   });
 
   const enrichmentRunsQuery = useQuery({
@@ -93,12 +143,9 @@ export default function ArchiveAdminPage() {
     enabled: isAdmin && sourceIds.length > 0,
     queryFn: async () => {
       const runLists = await Promise.all(sourceIds.map((sourceId) => listArchiveEnrichmentRuns(sourceId, 8)));
-      const entries = await Promise.all(
-        runLists.flatMap((runs) => runs.map((run) => getArchiveEnrichmentRunStatus(run.id))),
-      );
-      return entries;
+      return runLists.flat().map(toEnrichmentRunStatusDto);
     },
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   });
 
   const createSourceMutation = useMutation({

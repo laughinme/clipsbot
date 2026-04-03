@@ -157,7 +157,7 @@ services:
     <<: *worker-common
     environment:
       <<: *worker-common-env
-      WORKER_QUEUE_NAMES: archive.syncs,maintenance.jobs
+      WORKER_QUEUE_NAMES: archive.syncs
     deploy:
       resources:
         limits:
@@ -168,7 +168,18 @@ services:
     <<: *worker-common
     environment:
       <<: *worker-common-env
-      WORKER_QUEUE_NAMES: archive.indexing,archive.enrichment
+      WORKER_QUEUE_NAMES: archive.indexing
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+
+  worker-enrich:
+    <<: *worker-common
+    environment:
+      <<: *worker-common-env
+      WORKER_QUEUE_NAMES: archive.enrichment
     deploy:
       resources:
         limits:
@@ -191,7 +202,7 @@ services:
     profiles: ["legacy"]
     environment:
       <<: *worker-common-env
-      WORKER_QUEUE_NAMES: ""
+      WORKER_QUEUE_NAMES: clips.process,archive.syncs,archive.indexing,archive.enrichment
     deploy:
       resources:
         limits:

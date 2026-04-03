@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export COPYFILE_DISABLE=1
 
 load_env_file() {
   local env_path="$1"
@@ -157,8 +158,8 @@ ARCHIVE_IMPORT_ALLOWED_ROOTS=/imports
 EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-vertex}
 GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-${PROJECT_ID}}
 GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
-GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/google/application_default_credentials.json
-GOOGLE_APPLICATION_CREDENTIALS_HOST=${REMOTE_ROOT}/adc/application_default_credentials.json
+GOOGLE_APPLICATION_CREDENTIALS=
+GOOGLE_APPLICATION_CREDENTIALS_HOST=/tmp/adc-missing.json
 GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2-preview}
 GEMINI_SUMMARY_MODEL=${GEMINI_SUMMARY_MODEL:-gemini-2.5-flash}
 OCR_PROVIDER=${OCR_PROVIDER:-vision}
@@ -184,20 +185,40 @@ if tar --help 2>&1 | grep -q -- "--disable-copyfile"; then
   tar_args+=(--disable-copyfile)
 fi
 
-tar \
-  "${tar_args[@]}" \
-  --exclude="./.git" \
-  --exclude="./._*" \
-  --exclude="./.DS_Store" \
-  --exclude="./frontend/node_modules" \
-  --exclude="./frontend/.next" \
-  --exclude="./backend/.venv" \
-  --exclude="./backend/.pytest_cache" \
-  --exclude="*/__pycache__" \
-  --exclude="*.pyc" \
-  --exclude="./frontend/.turbo" \
-  -czf "${REPO_TARBALL}" \
-  -C "${ROOT_DIR}" .
+if ((${#tar_args[@]})); then
+  tar \
+    "${tar_args[@]}" \
+    --exclude="./.git" \
+    --exclude="./._*" \
+    --exclude="*/._*" \
+    --exclude="./.DS_Store" \
+    --exclude="*/.DS_Store" \
+    --exclude="./frontend/node_modules" \
+    --exclude="./frontend/.next" \
+    --exclude="./backend/.venv" \
+    --exclude="./backend/.pytest_cache" \
+    --exclude="*/__pycache__" \
+    --exclude="*.pyc" \
+    --exclude="./frontend/.turbo" \
+    -czf "${REPO_TARBALL}" \
+    -C "${ROOT_DIR}" .
+else
+  tar \
+    --exclude="./.git" \
+    --exclude="./._*" \
+    --exclude="*/._*" \
+    --exclude="./.DS_Store" \
+    --exclude="*/.DS_Store" \
+    --exclude="./frontend/node_modules" \
+    --exclude="./frontend/.next" \
+    --exclude="./backend/.venv" \
+    --exclude="./backend/.pytest_cache" \
+    --exclude="*/__pycache__" \
+    --exclude="*.pyc" \
+    --exclude="./frontend/.turbo" \
+    -czf "${REPO_TARBALL}" \
+    -C "${ROOT_DIR}" .
+fi
 
 if [[ "${SKIP_EXPORT_SYNC}" != "true" ]]; then
   tar -cf "${EXPORT_TARBALL}" -C "$(dirname "${EXPORT_DIR}")" "$(basename "${EXPORT_DIR}")"
@@ -262,7 +283,7 @@ gcloud compute ssh "${INSTANCE_NAME}" \
     cp ${REMOTE_ROOT}/.env app/.env
     cp ${REMOTE_ROOT}/backend.env app/backend/.env
     cd app
-    \$COMPOSE_CMD up -d --build backend scheduler worker-sync worker-index worker-clips bot frontend nginx caddy db redis rabbitmq minio minio-init qdrant
+    \$COMPOSE_CMD up -d --build backend scheduler worker-sync worker-index worker-enrich worker-clips bot frontend nginx caddy db redis rabbitmq minio minio-init qdrant
   "
 
 echo "Deployed to https://${PUBLIC_HOSTNAME}"
