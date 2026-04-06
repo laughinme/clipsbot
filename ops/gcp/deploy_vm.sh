@@ -151,7 +151,12 @@ EXTERNAL_IP="$(
     --zone "${ZONE}" \
     --format="value(networkInterfaces[0].accessConfigs[0].natIP)"
 )"
-PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-${EXTERNAL_IP}.sslip.io}"
+
+if [[ -n "${PUBLIC_HOSTNAME:-}" && "${PUBLIC_HOSTNAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.sslip\.io$ ]]; then
+  PUBLIC_HOSTNAME="${EXTERNAL_IP}.sslip.io"
+else
+  PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-${EXTERNAL_IP}.sslip.io}"
+fi
 
 mkdir -p /tmp/clipsbot-cloud
 cat > /tmp/clipsbot-cloud/.env <<EOF
