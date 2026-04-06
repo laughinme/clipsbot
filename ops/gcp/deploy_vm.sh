@@ -365,6 +365,8 @@ gcloud compute ssh "${INSTANCE_NAME}" \
     fi
     cp ${REMOTE_ROOT}/.env app/.env
     cp ${REMOTE_ROOT}/backend.env app/backend/.env
+    touch app/frontend/.env
+    touch app/bot/.env
     cd app
     \$COMPOSE_CMD up -d --build db redis rabbitmq minio minio-init qdrant
     DB_CID=\"\$(\$COMPOSE_CMD ps -q db)\"
