@@ -36,6 +36,13 @@ BOOT_DISK_SIZE_GB="${BOOT_DISK_SIZE_GB:-100}"
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value core/project 2>/dev/null)}"
 EXPORT_DIR="${EXPORT_DIR:-/Users/laughinme/Downloads/AyuGram Desktop/ChatExport_2026-03-23}"
 SKIP_EXPORT_SYNC="${SKIP_EXPORT_SYNC:-false}"
+SKIP_STATE_SYNC="${SKIP_STATE_SYNC:-false}"
+STATE_DIR="${STATE_DIR:-/tmp/clipsbot-gcp-state}"
+PG_DUMP_PATH="${PG_DUMP_PATH:-${STATE_DIR}/templatepg_test.dump}"
+QDRANT_SNAPSHOT_PATH="${QDRANT_SNAPSHOT_PATH:-${STATE_DIR}/knowledge_corpus_restored_http.snapshot}"
+MINIO_MEDIA_DIR="${MINIO_MEDIA_DIR:-${STATE_DIR}/media-private}"
+MINIO_MEDIA_TARBALL="${MINIO_MEDIA_TARBALL:-/tmp/clipsbot-media-private.tar}"
+RESTORE_QDRANT_COLLECTION="${RESTORE_QDRANT_COLLECTION:-knowledge_corpus_restored_http}"
 REMOTE_ROOT="/srv/clipsbot"
 REMOTE_IMPORT_ROOT="${REMOTE_ROOT}/imports"
 REMOTE_STAGING="~/clipsbot-stage"
@@ -55,6 +62,21 @@ fi
 if [[ "${SKIP_EXPORT_SYNC}" != "true" && ! -d "${EXPORT_DIR}" ]]; then
   echo "EXPORT_DIR does not exist: ${EXPORT_DIR}"
   exit 1
+fi
+
+if [[ "${SKIP_STATE_SYNC}" != "true" ]]; then
+  if [[ ! -f "${PG_DUMP_PATH}" ]]; then
+    echo "PG_DUMP_PATH does not exist: ${PG_DUMP_PATH}"
+    exit 1
+  fi
+  if [[ ! -f "${QDRANT_SNAPSHOT_PATH}" ]]; then
+    echo "QDRANT_SNAPSHOT_PATH does not exist: ${QDRANT_SNAPSHOT_PATH}"
+    exit 1
+  fi
+  if [[ ! -d "${MINIO_MEDIA_DIR}" ]]; then
+    echo "MINIO_MEDIA_DIR does not exist: ${MINIO_MEDIA_DIR}"
+    exit 1
+  fi
 fi
 
 required_tools=(gcloud tar)
@@ -174,7 +196,7 @@ STT_LONG_MODEL=${STT_LONG_MODEL:-latest_long}
 EMBEDDING_VECTOR_SIZE=${EMBEDDING_VECTOR_SIZE:-3072}
 QDRANT_ENABLED=true
 QDRANT_URL=http://qdrant:6333
-QDRANT_COLLECTION=${QDRANT_COLLECTION:-knowledge_corpus}
+QDRANT_COLLECTION=${QDRANT_COLLECTION:-${RESTORE_QDRANT_COLLECTION}}
 NEXT_PUBLIC_API_BASE_URL=
 EOF
 
@@ -197,6 +219,7 @@ if ((${#tar_args[@]})); then
     --exclude="./frontend/.next" \
     --exclude="./backend/.venv" \
     --exclude="./backend/.pytest_cache" \
+    --exclude="./backend/.qdrant-restored" \
     --exclude="*/__pycache__" \
     --exclude="*.pyc" \
     --exclude="./frontend/.turbo" \
@@ -213,6 +236,7 @@ else
     --exclude="./frontend/.next" \
     --exclude="./backend/.venv" \
     --exclude="./backend/.pytest_cache" \
+    --exclude="./backend/.qdrant-restored" \
     --exclude="*/__pycache__" \
     --exclude="*.pyc" \
     --exclude="./frontend/.turbo" \
@@ -224,6 +248,11 @@ if [[ "${SKIP_EXPORT_SYNC}" != "true" ]]; then
   tar -cf "${EXPORT_TARBALL}" -C "$(dirname "${EXPORT_DIR}")" "$(basename "${EXPORT_DIR}")"
 fi
 
+if [[ "${SKIP_STATE_SYNC}" != "true" ]]; then
+  rm -f "${MINIO_MEDIA_TARBALL}"
+  tar -cf "${MINIO_MEDIA_TARBALL}" -C "${STATE_DIR}" "$(basename "${MINIO_MEDIA_DIR}")"
+fi
+
 gcloud compute ssh "${INSTANCE_NAME}" \
   "${GCLOUD_SSH_FLAGS[@]}" \
   --command "mkdir -p ${REMOTE_STAGING}"
@@ -233,6 +262,17 @@ gcloud compute scp --quiet --force-key-file-overwrite "${REPO_TARBALL}" "${INSTA
   --zone "${ZONE}"
 if [[ "${SKIP_EXPORT_SYNC}" != "true" ]]; then
   gcloud compute scp --quiet --force-key-file-overwrite "${EXPORT_TARBALL}" "${INSTANCE_NAME}:${REMOTE_STAGING}/telegram-export.tar" \
+    --project "${PROJECT_ID}" \
+    --zone "${ZONE}"
+fi
+if [[ "${SKIP_STATE_SYNC}" != "true" ]]; then
+  gcloud compute scp --quiet --force-key-file-overwrite "${PG_DUMP_PATH}" "${INSTANCE_NAME}:${REMOTE_STAGING}/templatepg.dump" \
+    --project "${PROJECT_ID}" \
+    --zone "${ZONE}"
+  gcloud compute scp --quiet --force-key-file-overwrite "${QDRANT_SNAPSHOT_PATH}" "${INSTANCE_NAME}:${REMOTE_STAGING}/qdrant.snapshot" \
+    --project "${PROJECT_ID}" \
+    --zone "${ZONE}"
+  gcloud compute scp --quiet --force-key-file-overwrite "${MINIO_MEDIA_TARBALL}" "${INSTANCE_NAME}:${REMOTE_STAGING}/media-private.tar" \
     --project "${PROJECT_ID}" \
     --zone "${ZONE}"
 fi
@@ -255,9 +295,38 @@ gcloud compute ssh "${INSTANCE_NAME}" \
   "${GCLOUD_SSH_FLAGS[@]}" \
   --command "
     set -euxo pipefail
-    COMPOSE_CMD='sudo docker-compose'
-    if sudo docker compose version >/dev/null 2>&1; then
-      COMPOSE_CMD='sudo docker compose'
+    install_docker_compose_plugin() {
+      if sudo docker compose version >/dev/null 2>&1; then
+        return 0
+      fi
+
+      arch=\$(uname -m)
+      case \"\${arch}\" in
+        x86_64|amd64)
+          arch='x86_64'
+          ;;
+        aarch64|arm64)
+          arch='aarch64'
+          ;;
+        *)
+          echo 'Unsupported architecture for docker compose plugin: '\${arch}
+          return 1
+          ;;
+      esac
+
+      sudo mkdir -p /usr/local/lib/docker/cli-plugins
+      sudo curl -fsSL \
+        \"https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-\${arch}\" \
+        -o /usr/local/lib/docker/cli-plugins/docker-compose
+      sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+      sudo docker compose version >/dev/null
+    }
+
+    install_docker_compose_plugin || true
+
+    COMPOSE_CMD='sudo docker compose'
+    if ! sudo docker compose version >/dev/null 2>&1; then
+      COMPOSE_CMD='sudo docker-compose'
     fi
     sudo mkdir -p ${REMOTE_ROOT} ${REMOTE_IMPORT_ROOT}
     sudo mkdir -p ${REMOTE_ROOT}/adc
@@ -268,6 +337,15 @@ gcloud compute ssh "${INSTANCE_NAME}" \
     cp ${REMOTE_STAGING}/repo.tar.gz ${REMOTE_ROOT}/repo.tar.gz
     if [ -f ${REMOTE_STAGING}/telegram-export.tar ]; then
       cp ${REMOTE_STAGING}/telegram-export.tar ${REMOTE_ROOT}/telegram-export.tar
+    fi
+    if [ -f ${REMOTE_STAGING}/templatepg.dump ]; then
+      cp ${REMOTE_STAGING}/templatepg.dump ${REMOTE_ROOT}/templatepg.dump
+    fi
+    if [ -f ${REMOTE_STAGING}/qdrant.snapshot ]; then
+      cp ${REMOTE_STAGING}/qdrant.snapshot ${REMOTE_ROOT}/qdrant.snapshot
+    fi
+    if [ -f ${REMOTE_STAGING}/media-private.tar ]; then
+      cp ${REMOTE_STAGING}/media-private.tar ${REMOTE_ROOT}/media-private.tar
     fi
     cp ${REMOTE_STAGING}/.env ${REMOTE_ROOT}/.env
     cp ${REMOTE_STAGING}/backend.env ${REMOTE_ROOT}/backend.env
@@ -280,10 +358,42 @@ gcloud compute ssh "${INSTANCE_NAME}" \
     if [ -f ${REMOTE_ROOT}/telegram-export.tar ]; then
       tar -xf ${REMOTE_ROOT}/telegram-export.tar -C ${REMOTE_IMPORT_ROOT}
     fi
+    if [ -f ${REMOTE_ROOT}/media-private.tar ]; then
+      rm -rf ${REMOTE_ROOT}/restore
+      mkdir -p ${REMOTE_ROOT}/restore
+      tar -xf ${REMOTE_ROOT}/media-private.tar -C ${REMOTE_ROOT}/restore
+    fi
     cp ${REMOTE_ROOT}/.env app/.env
     cp ${REMOTE_ROOT}/backend.env app/backend/.env
     cd app
-    \$COMPOSE_CMD up -d --build backend scheduler worker-sync worker-index worker-enrich worker-clips bot frontend nginx caddy db redis rabbitmq minio minio-init qdrant
+    \$COMPOSE_CMD up -d --build db redis rabbitmq minio minio-init qdrant
+    DB_CID=\"\$(\$COMPOSE_CMD ps -q db)\"
+    until [ -n \"\${DB_CID}\" ] && sudo docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \"\${DB_CID}\" 2>/dev/null | grep -q healthy; do
+      sleep 2
+      DB_CID=\"\$(\$COMPOSE_CMD ps -q db)\"
+    done
+    until curl -fsS http://127.0.0.1:6333/collections >/dev/null 2>&1; do sleep 2; done
+    until curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; do sleep 2; done
+    if [ -f ${REMOTE_ROOT}/templatepg.dump ]; then
+      sudo docker cp ${REMOTE_ROOT}/templatepg.dump \"\${DB_CID}:/tmp/templatepg.dump\"
+      sudo docker exec \"\${DB_CID}\" sh -lc 'pg_restore --clean --if-exists --no-owner -U postgres -d templatepg /tmp/templatepg.dump'
+    fi
+    if [ -f ${REMOTE_ROOT}/qdrant.snapshot ]; then
+      curl -fsS -X POST \
+        'http://127.0.0.1:6333/collections/${RESTORE_QDRANT_COLLECTION}/snapshots/upload?priority=snapshot' \
+        -F 'snapshot=@${REMOTE_ROOT}/qdrant.snapshot'
+      until curl -fsS http://127.0.0.1:6333/collections/${RESTORE_QDRANT_COLLECTION} >/dev/null 2>&1; do sleep 2; done
+    fi
+    if [ -d ${REMOTE_ROOT}/restore/media-private ]; then
+      sudo docker run --rm --network host --entrypoint /bin/sh \
+        -v ${REMOTE_ROOT}/restore:/restore \
+        minio/mc -lc '
+          mc alias set local http://127.0.0.1:9000 minioadmin minioadmin >/dev/null &&
+          mc mb --ignore-existing local/media-private >/dev/null &&
+          mc mirror --overwrite /restore/media-private local/media-private
+        '
+    fi
+    \$COMPOSE_CMD up -d --build backend scheduler worker-sync worker-index worker-enrich worker-clips bot frontend nginx caddy
   "
 
 echo "Deployed to https://${PUBLIC_HOSTNAME}"

@@ -187,6 +187,8 @@ secrets/
 test.py
 /.vscode
 nginx/certs/
+backend/.qdrant-restored/
+backups/
 
 # Allow tracked frontend shared utilities
 !frontend/src/shared/lib/

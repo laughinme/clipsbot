@@ -9,6 +9,8 @@ on:
       - "bot/**"
       - "frontend/**"
       - "caddy/**"
+      - "nginx/**"
+      - "rabbitmq/**"
       - "docker-compose.yml"
       - "ops/gcp/**"
       - ".env.example"
@@ -60,5 +62,6 @@ jobs:
         env:
           ADC_JSON_SOURCE: ${{ steps.auth.outputs.credentials_file_path }}
           SKIP_EXPORT_SYNC: "true"
+          SKIP_STATE_SYNC: "true"
           SKIP_ADC_SYNC: "true"
         run: bash ops/gcp/deploy_vm.sh
