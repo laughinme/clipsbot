@@ -395,6 +395,12 @@ gcloud compute ssh "${INSTANCE_NAME}" \
           mc mirror --overwrite /restore/media-private local/media-private
         '
     fi
+    for service_name in backend scheduler worker-sync worker-index worker-enrich worker-clips bot frontend nginx caddy; do
+      stale_ids=\"\$(sudo docker ps -aq --filter \"name=\${service_name}\")\"
+      if [ -n \"\${stale_ids}\" ]; then
+        sudo docker rm -f \${stale_ids} || true
+      fi
+    done
     \$COMPOSE_CMD up -d --build backend scheduler worker-sync worker-index worker-enrich worker-clips bot frontend nginx caddy
   "
 
