@@ -12,7 +12,7 @@ router = APIRouter(prefix="/search")
 
 
 @router.post(
-    path="/",
+    path="",
     response_model=ArchiveSearchResponse,
     summary="Semantic archive search",
 )
