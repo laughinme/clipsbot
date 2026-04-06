@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from typing import Awaitable, Callable
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from qdrant_client import models
@@ -56,6 +57,15 @@ class SemanticSearchService:
         self.qdrant = qdrant
         self.media_storage = media_storage
         self.settings = settings
+
+    async def _report_progress(
+        self,
+        callback: Callable[[str, str | None], Awaitable[None]] | None,
+        stage: str,
+        detail: str | None = None,
+    ) -> None:
+        if callback is not None:
+            await callback(stage, detail)
 
     def _preview(self, value: str | None, limit: int = 280) -> str | None:
         if not value:
@@ -198,10 +208,25 @@ class SemanticSearchService:
             "source_relative_path": media_asset.source_relative_path if media_asset else None,
         }
 
-    async def process_indexing_job(self, job_id: UUID | str) -> None:
-        job = await self.indexing_job_repo.get_by_id(job_id)
+    async def process_indexing_job(
+        self,
+        job_id: UUID | str,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
+    ) -> None:
+        snapshot = await self.indexing_job_repo.get_processing_snapshot(job_id)
+        if (
+            snapshot is not None
+            and snapshot.status != "done"
+            and snapshot.projection.projection_kind == ProjectionKind.RAW_MULTIMODAL.value
+        ):
+            await self._report_progress(progress_callback, "job_loaded", str(job_id))
+            await self._process_single_job_fast(snapshot, progress_callback=progress_callback)
+            return
+
+        job = await self.indexing_job_repo.get_by_id(job_id, include_enrichments=False)
         if job is None or job.status == "done":
             return
+        await self._report_progress(progress_callback, "job_loaded", str(job_id))
 
         projection = job.projection
         if projection is None:
@@ -209,14 +234,24 @@ class SemanticSearchService:
         item = projection.corpus_item
         if item is None:
             raise NotFoundError("Corpus item not found for indexing job.")
+        if projection.projection_kind == ProjectionKind.DERIVED_TEXT.value:
+            full_item = await self.corpus_item_repo.get_by_id(item.id)
+            if full_item is None:
+                raise NotFoundError("Corpus item not found for derived indexing job.")
+            item = full_item
+            projection = next(
+                (candidate for candidate in full_item.projections if candidate.id == projection.id),
+                projection,
+            )
         primary_asset = self._primary_asset(item)
 
-        job.status = "processing"
-        job.attempts += 1
-        job.started_at = datetime.now(timezone.utc)
+        batch_jobs = [job]
+        if job.status != "processing" or job.started_at is None:
+            job.status = "processing"
+            job.attempts += 1
+            job.started_at = datetime.now(timezone.utc)
         projection.index_status = ProjectionIndexStatus.PROCESSING.value
         projection.index_error = None
-        batch_jobs = [job]
 
         if self._is_text_batch_candidate(projection=projection, item=item):
             additional_jobs = await self.indexing_job_repo.claim_additional_text_batch(
@@ -233,15 +268,24 @@ class SemanticSearchService:
                 batch_jobs.append(extra_job)
 
         batch_job_ids = [batch_job.id for batch_job in batch_jobs]
+        await self._report_progress(progress_callback, "db_prepare_commit", f"batch={len(batch_job_ids)}")
         await self.uow.commit()
+        await self._report_progress(progress_callback, "job_ready", f"batch={len(batch_job_ids)}")
 
         try:
             if len(batch_jobs) > 1 or self._is_text_batch_candidate(projection=projection, item=item):
-                await self._process_text_batch(batch_jobs)
+                await self._process_text_batch(batch_jobs, progress_callback=progress_callback)
             else:
-                await self._process_single_job(job, projection=projection, item=item, primary_asset=primary_asset)
+                await self._process_single_job(
+                    job,
+                    projection=projection,
+                    item=item,
+                    primary_asset=primary_asset,
+                    progress_callback=progress_callback,
+                )
         except Exception as exc:
             await self.uow.session.rollback()
+            await self._report_progress(progress_callback, "failed", str(exc))
             failed_jobs = await self.indexing_job_repo.list_by_ids(batch_job_ids)
             for failed_job in failed_jobs:
                 if failed_job.projection is None:
@@ -274,7 +318,12 @@ class SemanticSearchService:
             return self._build_derived_text(item)
         return self.embeddings.build_document_text(item, primary_asset)
 
-    async def _process_text_batch(self, jobs: list) -> None:
+    async def _process_text_batch(
+        self,
+        jobs: list,
+        *,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
+    ) -> None:
         indexed_at = datetime.now(timezone.utc)
         documents: list[str] = []
         entries: list[tuple] = []
@@ -294,6 +343,7 @@ class SemanticSearchService:
             )
             entries.append((job, projection, item))
 
+        await self._report_progress(progress_callback, "vertex_request", f"text_batch={len(entries)}")
         vectors = await self.embeddings.embed_documents(documents)
         if len(vectors) != len(entries):
             raise RuntimeError("Embedding batch result size does not match requested documents.")
@@ -307,6 +357,7 @@ class SemanticSearchService:
                 projection_kind=projection.projection_kind,
             )
             payload = await self.build_point_payload(item, projection_kind=projection_kind)
+            await self._report_progress(progress_callback, "qdrant_upsert")
             await self.qdrant.upsert_point(point_id=point_id, vector=vector, payload=payload)
             projection.qdrant_point_id = point_id
             projection.index_status = ProjectionIndexStatus.INDEXED.value
@@ -320,7 +371,68 @@ class SemanticSearchService:
             job.completed_at = indexed_at
             job.last_error = None
 
+        await self._report_progress(progress_callback, "db_commit")
         await self.uow.commit()
+
+    async def _process_single_job_fast(
+        self,
+        job,
+        *,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
+    ) -> None:
+        projection = job.projection
+        item = projection.corpus_item
+        primary_asset = self._primary_asset(item)
+        try:
+            media_bytes = None
+            if primary_asset is not None:
+                await self._report_progress(
+                    progress_callback,
+                    "read_asset",
+                    primary_asset.source_relative_path or item.stable_key,
+                )
+                media_bytes = await self._read_asset_bytes(primary_asset)
+            vector = await self.embeddings.embed_message(
+                item,
+                primary_asset,
+                media_bytes=media_bytes,
+                progress_callback=progress_callback,
+            )
+            if len(vector) != self.settings.EMBEDDING_VECTOR_SIZE:
+                raise RuntimeError(f"Unexpected embedding size {len(vector)}")
+
+            point_id = self._build_point_id(
+                stable_key=item.stable_key,
+                projection_kind=projection.projection_kind,
+            )
+            payload = await self.build_point_payload(
+                item,
+                projection_kind=ProjectionKind(projection.projection_kind),
+            )
+            await self._report_progress(progress_callback, "qdrant_upsert", item.stable_key)
+            await self.qdrant.upsert_point(point_id=point_id, vector=vector, payload=payload)
+            await self._report_progress(progress_callback, "db_commit", item.stable_key)
+            await self.indexing_job_repo.mark_done_fast(
+                job_id=job.id,
+                projection_id=projection.id,
+                point_id=point_id,
+                embedding_model=(
+                    self.settings.GEMINI_EMBEDDING_MODEL
+                    if self.settings.EMBEDDING_PROVIDER == "vertex"
+                    else f"stub:{self.settings.EMBEDDING_VECTOR_SIZE}"
+                ),
+            )
+            await self.uow.commit()
+        except Exception as exc:
+            await self.uow.session.rollback()
+            await self._report_progress(progress_callback, "failed", str(exc))
+            await self.indexing_job_repo.mark_failed_fast(
+                job_id=job.id,
+                projection_id=projection.id,
+                error=str(exc),
+            )
+            await self.uow.commit()
+            raise
 
     async def _process_single_job(
         self,
@@ -329,15 +441,27 @@ class SemanticSearchService:
         projection: CorpusProjection,
         item: CorpusItem,
         primary_asset: CorpusAsset | None,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> None:
         if projection.projection_kind == ProjectionKind.DERIVED_TEXT.value:
             document_text = self._build_derived_text(item)
+            await self._report_progress(progress_callback, "vertex_request", f"derived_text:{item.stable_key}")
             vector = await self.embeddings.embed_text(document_text)
         else:
             media_bytes = None
             if primary_asset is not None:
+                await self._report_progress(
+                    progress_callback,
+                    "read_asset",
+                    primary_asset.source_relative_path or item.stable_key,
+                )
                 media_bytes = await self._read_asset_bytes(primary_asset)
-            vector = await self.embeddings.embed_message(item, primary_asset, media_bytes=media_bytes)
+            vector = await self.embeddings.embed_message(
+                item,
+                primary_asset,
+                media_bytes=media_bytes,
+                progress_callback=progress_callback,
+            )
 
         if len(vector) != self.settings.EMBEDDING_VECTOR_SIZE:
             raise RuntimeError(f"Unexpected embedding size {len(vector)}")
@@ -348,6 +472,7 @@ class SemanticSearchService:
             projection_kind=projection.projection_kind,
         )
         payload = await self.build_point_payload(item, projection_kind=projection_kind)
+        await self._report_progress(progress_callback, "qdrant_upsert", item.stable_key)
         await self.qdrant.upsert_point(point_id=point_id, vector=vector, payload=payload)
 
         projection.qdrant_point_id = point_id
@@ -361,6 +486,7 @@ class SemanticSearchService:
         job.status = "done"
         job.completed_at = datetime.now(timezone.utc)
         job.last_error = None
+        await self._report_progress(progress_callback, "db_commit", item.stable_key)
         await self.uow.commit()
 
     async def _read_asset_bytes(self, asset: CorpusAsset) -> bytes:

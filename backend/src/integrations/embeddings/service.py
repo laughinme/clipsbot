@@ -8,6 +8,7 @@ import tempfile
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from google import genai
 from google.genai import types
@@ -38,6 +39,7 @@ class EmbeddingProvider:
         item: CorpusItem,
         media_asset: CorpusAsset | None = None,
         media_bytes: bytes | None = None,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> list[float]:
         raise NotImplementedError
 
@@ -108,6 +110,7 @@ class StubEmbeddingProvider(EmbeddingProvider):
         item: CorpusItem,
         media_asset: CorpusAsset | None = None,
         media_bytes: bytes | None = None,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> list[float]:
         return self._feature_hash_embed(self._prepare_document(item, media_asset))
 
@@ -140,6 +143,15 @@ class VertexEmbeddingProvider(EmbeddingProvider):
         if media_asset and media_asset.original_filename:
             body_parts.append(f"filename: {media_asset.original_filename}")
         return f"title: {title} | text: {' | '.join(body_parts)}".strip()
+
+    async def _report_progress(
+        self,
+        callback: Callable[[str, str | None], Awaitable[None]] | None,
+        stage: str,
+        detail: str | None = None,
+    ) -> None:
+        if callback is not None:
+            await callback(stage, detail)
 
     def build_document_text(
         self,
@@ -225,7 +237,10 @@ class VertexEmbeddingProvider(EmbeddingProvider):
                 )
                 return Path(temp_file.name).read_bytes()
 
-            return await asyncio.to_thread(_run), "audio/wav"
+            return await asyncio.wait_for(
+                asyncio.to_thread(_run),
+                timeout=self.settings.EMBEDDING_MEDIA_CONVERSION_TIMEOUT_SEC,
+            ), "audio/wav"
 
     async def _convert_video_for_embedding(self, payload: bytes) -> tuple[bytes, str]:
         def _run_ffmpeg() -> bytes:
@@ -257,7 +272,10 @@ class VertexEmbeddingProvider(EmbeddingProvider):
             )
             return process.stdout
 
-        return await asyncio.to_thread(_run_ffmpeg), "video/mp4"
+        return await asyncio.wait_for(
+            asyncio.to_thread(_run_ffmpeg),
+            timeout=self.settings.EMBEDDING_MEDIA_CONVERSION_TIMEOUT_SEC,
+        ), "video/mp4"
 
     async def _prepare_media_part(self, item: CorpusItem, media_asset: CorpusAsset | None, media_bytes: bytes) -> types.Part:
         mime_type = (media_asset.mime_type or "").lower()
@@ -284,15 +302,26 @@ class VertexEmbeddingProvider(EmbeddingProvider):
         item: CorpusItem,
         media_asset: CorpusAsset | None = None,
         media_bytes: bytes | None = None,
+        progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> list[float]:
         document_text = self._prepare_document(item, media_asset)
         parts = [types.Part.from_text(text=document_text)]
         if item.content_type != "text" and media_asset and media_bytes:
+            asset_detail = media_asset.source_relative_path or media_asset.mime_type or item.content_type
             try:
+                if item.content_type in {"voice", "audio"}:
+                    await self._report_progress(progress_callback, "convert_audio", asset_detail)
+                elif item.content_type in {"video", "video_note"}:
+                    await self._report_progress(progress_callback, "convert_video", asset_detail)
+                elif item.content_type == "photo":
+                    await self._report_progress(progress_callback, "prepare_photo", asset_detail)
                 parts.append(await self._prepare_media_part(item, media_asset, media_bytes))
+                await self._report_progress(progress_callback, "vertex_request", asset_detail)
                 return await self._embed_parts(parts)
             except Exception:
+                await self._report_progress(progress_callback, "vertex_fallback_text", asset_detail)
                 return await self._embed_parts([types.Part.from_text(text=document_text)])
+        await self._report_progress(progress_callback, "vertex_request", item.content_type)
         return await self._embed_parts(parts)
 
 
