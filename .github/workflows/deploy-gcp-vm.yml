@@ -1,5 +1,9 @@
 name: deploy-gcp-vm
 
+concurrency:
+  group: deploy-gcp-vm
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
