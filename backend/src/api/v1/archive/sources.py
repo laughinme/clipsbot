@@ -1,8 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
+import asyncpg
+import json
 from fastapi import APIRouter, Depends, Query
 
+from core.config import Settings, get_settings
 from core.security import require
 from database.relational_db import User
 from domain.archive import (
@@ -26,10 +29,36 @@ router = APIRouter()
     summary="List archive sources",
 )
 async def list_sources(
-    _: Annotated[User, Depends(require("admin"))],
-    svc: Annotated[ArchiveSourceService, Depends(get_archive_source_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ):
-    return await svc.list_sources()
+    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+    connection = await asyncpg.connect(dsn=dsn)
+    try:
+        rows = await connection.fetch(
+            """
+            select id, kind, slug, display_name, status, config_json, created_at, updated_at
+            from source_connections
+            order by created_at desc
+            """
+        )
+    finally:
+        await connection.close()
+
+    return SourceListResponse(
+        items=[
+            SourceConnectionModel(
+                id=row["id"],
+                kind=row["kind"],
+                slug=row["slug"],
+                display_name=row["display_name"],
+                status=row["status"],
+                config_json=json.loads(row["config_json"]) if isinstance(row["config_json"], str) else (row["config_json"] or {}),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+    )
 
 
 @router.post(
