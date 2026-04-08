@@ -8,7 +8,6 @@ import { Image as ImageIcon, Music4, Search, Sparkles, Video } from "lucide-reac
 
 import type { ArchiveContentType, ArchiveSearchItem, SourceConnection } from "@/entities/archive/model";
 import { Header } from "@/features/navigation/ui/Header";
-import { useAuth } from "@/app/providers/auth/useAuth";
 import { listArchiveSources, searchArchive, searchSimilarArchiveItems } from "@/shared/api/archive";
 import { Button } from "@/shared/components/ui/button";
 import { Card } from "@/shared/components/ui/card";
@@ -16,7 +15,6 @@ import { Checkbox } from "@/shared/components/ui/checkbox";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { useI18n } from "@/shared/i18n/I18nProvider";
-import { AdminAccessGate } from "@/widgets/access/ui/admin-access-gate";
 
 const SEARCHABLE_TYPES: ArchiveContentType[] = ["text", "photo", "voice", "video_note", "video", "audio"];
 
@@ -54,7 +52,6 @@ const getSnippetBadgeLabel = (source: ArchiveSearchItem["snippet_source"]) => {
 
 export default function ArchivePage() {
   const { t } = useI18n();
-  const auth = useAuth();
   const [query, setQuery] = useState("");
   const [selectedTypes, setSelectedTypes] = useState<ArchiveContentType[]>(SEARCHABLE_TYPES);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
@@ -65,13 +62,9 @@ export default function ArchivePage() {
   const [presentOnly, setPresentOnly] = useState(false);
   const [results, setResults] = useState<ArchiveSearchItem[]>([]);
 
-  const roles = auth?.user?.role_slugs ?? auth?.user?.roles ?? [];
-  const isAdmin = roles.includes("admin");
-
   const sourcesQuery = useQuery({
     queryKey: ["archive-sources", "search-page"],
     queryFn: listArchiveSources,
-    enabled: isAdmin,
   });
 
   const searchMutation = useMutation({
@@ -132,12 +125,7 @@ export default function ArchivePage() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <AdminAccessGate
-        requiredRoles={["admin"]}
-        accessDeniedTitle={t("archive.accessDeniedTitle")}
-        accessDeniedBody={t("archive.accessDeniedBody")}
-      >
-        <main className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-12">
+      <main className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-12">
           <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
             <motion.div
               initial={{ opacity: 0, y: 18 }}
@@ -369,8 +357,7 @@ export default function ArchivePage() {
               })
             )}
           </section>
-        </main>
-      </AdminAccessGate>
+      </main>
     </div>
   );
 }

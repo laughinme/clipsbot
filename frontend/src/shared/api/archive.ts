@@ -1,4 +1,4 @@
-import apiProtected from "./axiosInstance";
+import apiProtected, { apiPublic } from "./axiosInstance";
 import type {
   ArchiveSearchPayload,
   ArchiveSearchResponse,
@@ -14,7 +14,7 @@ import type {
 } from "@/entities/archive/model";
 
 export const listArchiveSources = async (): Promise<SourceConnection[]> => {
-  const response = await apiProtected.get<{ items: SourceConnection[] }>("/archive/sources");
+  const response = await apiPublic.get<{ items: SourceConnection[] }>("/archive/sources");
   return response.data.items;
 };
 
@@ -58,7 +58,7 @@ export const getArchiveSyncStatus = async (syncRunId: string): Promise<SyncRunSt
 };
 
 export const searchArchive = async (payload: ArchiveSearchPayload): Promise<ArchiveSearchResponse> => {
-  const response = await apiProtected.post<ArchiveSearchResponse>("/archive/search", payload);
+  const response = await apiPublic.post<ArchiveSearchResponse>("/archive/search", payload);
   return response.data;
 };
 
@@ -66,7 +66,7 @@ export const searchSimilarArchiveItems = async (
   corpusItemId: string,
   limit = 10,
 ): Promise<ArchiveSearchResponse> => {
-  const response = await apiProtected.get<ArchiveSearchResponse>(`/archive/search/similar/${corpusItemId}`, {
+  const response = await apiPublic.get<ArchiveSearchResponse>(`/archive/search/similar/${corpusItemId}`, {
     params: { limit },
   });
   return response.data;
