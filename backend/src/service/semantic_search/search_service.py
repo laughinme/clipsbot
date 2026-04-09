@@ -660,3 +660,19 @@ class SemanticSearchService:
                 if item_id in item_map
             ]
         )
+
+    async def get_item(self, corpus_item_id: UUID | str) -> ArchiveSearchResultItem:
+        item = await self.corpus_item_repo.get_by_id(corpus_item_id)
+        if item is None:
+            raise NotFoundError("Corpus item not found.")
+
+        matched_projection_kinds = [
+            ProjectionKind(projection.projection_kind)
+            for projection in item.projections
+            if projection.index_status == ProjectionIndexStatus.INDEXED.value
+        ]
+        return self._build_search_item(
+            item,
+            score=1.0,
+            matched_projection_kinds=matched_projection_kinds,
+        )

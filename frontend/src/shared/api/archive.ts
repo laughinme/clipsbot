@@ -1,5 +1,6 @@
 import apiProtected, { apiPublic } from "./axiosInstance";
 import type {
+  ArchiveSearchItemResponse,
   ArchiveSearchPayload,
   ArchiveSearchResponse,
   EnrichmentRun,
@@ -59,6 +60,11 @@ export const getArchiveSyncStatus = async (syncRunId: string): Promise<SyncRunSt
 
 export const searchArchive = async (payload: ArchiveSearchPayload): Promise<ArchiveSearchResponse> => {
   const response = await apiPublic.post<ArchiveSearchResponse>("/archive/search", payload);
+  return response.data;
+};
+
+export const getArchiveItem = async (corpusItemId: string): Promise<ArchiveSearchItemResponse> => {
+  const response = await apiPublic.get<ArchiveSearchItemResponse>(`/archive/items/${corpusItemId}`);
   return response.data;
 };
 

@@ -136,6 +136,10 @@ export type ArchiveSearchResponse = {
   items: ArchiveSearchItem[];
 };
 
+export type ArchiveSearchItemResponse = {
+  item: ArchiveSearchItem;
+};
+
 export type ArchiveSearchFilters = {
   source_ids?: string[];
   source_kinds?: SourceKind[];

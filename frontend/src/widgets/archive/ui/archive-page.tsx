@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Image as ImageIcon, Music4, Search, Sparkles, Video } from "lucide-react";
+import { ExternalLink, Image as ImageIcon, Link2, Music4, Search, Sparkles, Video } from "lucide-react";
 
 import type { ArchiveContentType, ArchiveSearchItem, SourceConnection } from "@/entities/archive/model";
 import { Header } from "@/features/navigation/ui/Header";
-import { listArchiveSources, searchArchive, searchSimilarArchiveItems } from "@/shared/api/archive";
+import { getArchiveItem, listArchiveSources, searchArchive, searchSimilarArchiveItems } from "@/shared/api/archive";
 import { Button } from "@/shared/components/ui/button";
 import { Card } from "@/shared/components/ui/card";
 import { Checkbox } from "@/shared/components/ui/checkbox";
@@ -17,6 +17,10 @@ import { Label } from "@/shared/components/ui/label";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 
 const SEARCHABLE_TYPES: ArchiveContentType[] = ["text", "photo", "voice", "video_note", "video", "audio"];
+
+type ArchivePageProps = {
+  initialItemId?: string;
+};
 
 const getContentTypeIcon = (type: ArchiveContentType) => {
   if (type === "photo") {
@@ -50,7 +54,40 @@ const getSnippetBadgeLabel = (source: ArchiveSearchItem["snippet_source"]) => {
   return null;
 };
 
-export default function ArchivePage() {
+const parseTelegramLinkMeta = (item: ArchiveSearchItem) => {
+  const stableKeyParts = item.stable_key.split(":");
+  const stableKeyChatId =
+    stableKeyParts.length >= 3 && stableKeyParts[0] === "telegram" ? stableKeyParts[1] : null;
+  const stableKeyMessageId =
+    stableKeyParts.length >= 3 && stableKeyParts[0] === "telegram" ? stableKeyParts[2] : null;
+  const chatId = item.container_external_id || stableKeyChatId;
+
+  if (!chatId || !stableKeyMessageId || !chatId.startsWith("-100")) {
+    return null;
+  }
+
+  const channelId = chatId.slice(4);
+  if (!channelId || !/^\d+$/.test(channelId) || !/^\d+$/.test(stableKeyMessageId)) {
+    return null;
+  }
+
+  return {
+    channelId,
+    messageId: stableKeyMessageId,
+  };
+};
+
+const buildArchiveItemHref = (item: ArchiveSearchItem) => `/archive/items/${item.corpus_item_id}`;
+
+const buildTelegramOpenHref = (item: ArchiveSearchItem) => {
+  const meta = parseTelegramLinkMeta(item);
+  if (!meta) {
+    return null;
+  }
+  return `tg://privatepost?channel=${meta.channelId}&post=${meta.messageId}`;
+};
+
+export default function ArchivePage({ initialItemId }: ArchivePageProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [selectedTypes, setSelectedTypes] = useState<ArchiveContentType[]>(SEARCHABLE_TYPES);
@@ -65,6 +102,12 @@ export default function ArchivePage() {
   const sourcesQuery = useQuery({
     queryKey: ["archive-sources", "search-page"],
     queryFn: listArchiveSources,
+  });
+
+  const initialItemQuery = useQuery({
+    queryKey: ["archive-item", initialItemId],
+    queryFn: () => getArchiveItem(initialItemId!),
+    enabled: Boolean(initialItemId),
   });
 
   const searchMutation = useMutation({
@@ -121,6 +164,8 @@ export default function ArchivePage() {
   };
 
   const sources = sourcesQuery.data ?? [];
+  const displayedResults =
+    results.length > 0 ? results : initialItemQuery.data?.item ? [initialItemQuery.data.item] : [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -259,13 +304,19 @@ export default function ArchivePage() {
           </Card>
 
           <section className="grid gap-4">
-            {results.length === 0 ? (
+            {displayedResults.length === 0 ? (
               <Card className="border-border/70 p-8 text-center text-muted-foreground">
-                {searchMutation.isPending ? t("archive.searching") : t("archive.empty")}
+                {searchMutation.isPending || initialItemQuery.isPending
+                  ? t("archive.searching")
+                  : initialItemQuery.isError
+                    ? t("archive.itemNotFound")
+                    : t("archive.empty")}
               </Card>
             ) : (
-              results.map((item) => {
+              displayedResults.map((item) => {
                 const Icon = getContentTypeIcon(item.content_type);
+                const archiveItemHref = buildArchiveItemHref(item);
+                const telegramOpenHref = buildTelegramOpenHref(item);
                 return (
                   <motion.article
                     key={item.corpus_item_id}
@@ -333,6 +384,20 @@ export default function ArchivePage() {
                           )}
 
                           <div className="flex flex-wrap gap-3">
+                            <Button asChild variant="outline">
+                              <Link href={archiveItemHref}>
+                                <Link2 className="mr-2 h-4 w-4" />
+                                {t("archive.openResult")}
+                              </Link>
+                            </Button>
+                            {telegramOpenHref && (
+                              <Button asChild variant="outline">
+                                <a href={telegramOpenHref}>
+                                  <ExternalLink className="mr-2 h-4 w-4" />
+                                  {t("archive.openTelegram")}
+                                </a>
+                              </Button>
+                            )}
                             {item.media?.download_url && (
                               <Button asChild variant="outline">
                                 <a href={item.media.download_url} target="_blank" rel="noreferrer">

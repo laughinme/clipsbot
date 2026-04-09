@@ -398,3 +398,7 @@ class ArchiveSearchResultItem(BaseModel):
 
 class ArchiveSearchResponse(BaseModel):
     items: list[ArchiveSearchResultItem]
+
+
+class ArchiveSearchItemResponse(BaseModel):
+    item: ArchiveSearchResultItem
