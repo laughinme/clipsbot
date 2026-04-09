@@ -360,6 +360,7 @@ class ArchiveSearchFilters(BaseModel):
 class ArchiveSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     limit: int = Field(20, ge=1, le=50)
+    offset: int = Field(0, ge=0)
     filters: ArchiveSearchFilters = Field(default_factory=ArchiveSearchFilters)
 
 
@@ -398,6 +399,9 @@ class ArchiveSearchResultItem(BaseModel):
 
 class ArchiveSearchResponse(BaseModel):
     items: list[ArchiveSearchResultItem]
+    limit: int
+    offset: int
+    has_more: bool
 
 
 class ArchiveSearchItemResponse(BaseModel):

@@ -6,7 +6,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { ExternalLink, Image as ImageIcon, Link2, Music4, Search, Sparkles, Video } from "lucide-react";
 
-import type { ArchiveContentType, ArchiveSearchItem, SourceConnection } from "@/entities/archive/model";
+import type {
+  ArchiveContentType,
+  ArchiveSearchItem,
+  ArchiveSearchPayload,
+  ArchiveSearchResponse,
+  SourceConnection,
+} from "@/entities/archive/model";
 import { Header } from "@/features/navigation/ui/Header";
 import { getArchiveItem, listArchiveSources, searchArchive, searchSimilarArchiveItems } from "@/shared/api/archive";
 import { Button } from "@/shared/components/ui/button";
@@ -17,6 +23,7 @@ import { Label } from "@/shared/components/ui/label";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 
 const SEARCHABLE_TYPES: ArchiveContentType[] = ["text", "photo", "voice", "video_note", "video", "audio"];
+const PAGE_SIZE = 20;
 
 type ArchivePageProps = {
   initialItemId?: string;
@@ -97,7 +104,9 @@ export default function ArchivePage({ initialItemId }: ArchivePageProps) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [presentOnly, setPresentOnly] = useState(false);
-  const [results, setResults] = useState<ArchiveSearchItem[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [lastSearchPayload, setLastSearchPayload] = useState<ArchiveSearchPayload | null>(null);
+  const [searchResponse, setSearchResponse] = useState<ArchiveSearchResponse | null>(null);
 
   const sourcesQuery = useQuery({
     queryKey: ["archive-sources", "search-page"],
@@ -112,12 +121,16 @@ export default function ArchivePage({ initialItemId }: ArchivePageProps) {
 
   const searchMutation = useMutation({
     mutationFn: searchArchive,
-    onSuccess: (response) => setResults(response.items),
+    onSuccess: (response) => setSearchResponse(response),
   });
 
   const similarMutation = useMutation({
     mutationFn: ({ corpusItemId }: { corpusItemId: string }) => searchSimilarArchiveItems(corpusItemId, 12),
-    onSuccess: (response) => setResults(response.items),
+    onSuccess: (response) => {
+      setSearchResponse(response);
+      setCurrentPage(1);
+      setLastSearchPayload(null);
+    },
   });
 
   const handleToggleType = (type: ArchiveContentType, checked: boolean) => {
@@ -144,28 +157,63 @@ export default function ArchivePage({ initialItemId }: ArchivePageProps) {
       .map((item) => item.trim())
       .filter(Boolean);
 
+  const buildSearchPayload = (): ArchiveSearchPayload => ({
+    query: query.trim(),
+    limit: PAGE_SIZE,
+    filters: {
+      content_types: selectedTypes,
+      source_ids: selectedSourceIds,
+      author_external_ids: parseStringList(authorIdsInput),
+      container_external_ids: parseStringList(containerIdsInput),
+      date_from: dateFrom ? new Date(dateFrom).toISOString() : null,
+      date_to: dateTo ? new Date(dateTo).toISOString() : null,
+      present_in_latest_sync: presentOnly ? true : null,
+    },
+  });
+
+  const runSearch = async (payload: ArchiveSearchPayload, page: number) => {
+    const response = await searchMutation.mutateAsync({
+      ...payload,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    });
+    setCurrentPage(page);
+    setLastSearchPayload(payload);
+    return response;
+  };
+
   const handleSearch = async () => {
     if (!query.trim()) {
       return;
     }
-    await searchMutation.mutateAsync({
-      query: query.trim(),
-      limit: 20,
-      filters: {
-        content_types: selectedTypes,
-        source_ids: selectedSourceIds,
-        author_external_ids: parseStringList(authorIdsInput),
-        container_external_ids: parseStringList(containerIdsInput),
-        date_from: dateFrom ? new Date(dateFrom).toISOString() : null,
-        date_to: dateTo ? new Date(dateTo).toISOString() : null,
-        present_in_latest_sync: presentOnly ? true : null,
-      },
-    });
+    await runSearch(buildSearchPayload(), 1);
+  };
+
+  const handlePageChange = async (page: number) => {
+    if (!lastSearchPayload || page < 1) {
+      return;
+    }
+    await runSearch(lastSearchPayload, page);
+  };
+
+  const handleFindSimilar = async (corpusItemId: string) => {
+    await similarMutation.mutateAsync({ corpusItemId });
   };
 
   const sources = sourcesQuery.data ?? [];
+  const showingSearchResults = searchResponse !== null;
   const displayedResults =
-    results.length > 0 ? results : initialItemQuery.data?.item ? [initialItemQuery.data.item] : [];
+    showingSearchResults ? searchResponse.items : initialItemQuery.data?.item ? [initialItemQuery.data.item] : [];
+  const resultsRangeFrom = searchResponse ? searchResponse.offset + 1 : 0;
+  const resultsRangeTo = searchResponse ? searchResponse.offset + displayedResults.length : 0;
+  const canGoToPreviousPage = currentPage > 1 && !searchMutation.isPending;
+  const canGoToNextPage = Boolean(searchResponse?.has_more) && !searchMutation.isPending;
+  const shouldShowPagination = Boolean(
+    showingSearchResults &&
+      searchResponse &&
+      displayedResults.length > 0 &&
+      (searchResponse.has_more || currentPage > 1),
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -408,7 +456,7 @@ export default function ArchivePage({ initialItemId }: ArchivePageProps) {
                             <Button
                               type="button"
                               variant="ghost"
-                              onClick={() => similarMutation.mutate({ corpusItemId: item.corpus_item_id })}
+                              onClick={() => void handleFindSimilar(item.corpus_item_id)}
                               disabled={similarMutation.isPending}
                             >
                               {similarMutation.isPending ? t("archive.similarLoading") : t("archive.similar")}
@@ -420,6 +468,38 @@ export default function ArchivePage({ initialItemId }: ArchivePageProps) {
                   </motion.article>
                 );
               })
+            )}
+            {shouldShowPagination && (
+              <Card className="border-border/70 p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {t("archive.pageLabel", { page: currentPage })}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("archive.resultsRange", { from: resultsRangeFrom, to: resultsRangeTo })}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!canGoToPreviousPage}
+                      onClick={() => void handlePageChange(currentPage - 1)}
+                    >
+                      {t("archive.previousPage")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!canGoToNextPage}
+                      onClick={() => void handlePageChange(currentPage + 1)}
+                    >
+                      {t("archive.nextPage")}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
             )}
           </section>
       </main>

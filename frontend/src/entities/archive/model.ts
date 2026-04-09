@@ -134,6 +134,9 @@ export type ArchiveSearchItem = {
 
 export type ArchiveSearchResponse = {
   items: ArchiveSearchItem[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
 };
 
 export type ArchiveSearchItemResponse = {
@@ -154,6 +157,7 @@ export type ArchiveSearchFilters = {
 export type ArchiveSearchPayload = {
   query: string;
   limit?: number;
+  offset?: number;
   filters?: ArchiveSearchFilters;
 };
 

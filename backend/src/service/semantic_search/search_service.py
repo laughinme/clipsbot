@@ -581,7 +581,8 @@ class SemanticSearchService:
 
     async def search(self, request: ArchiveSearchRequest) -> ArchiveSearchResponse:
         query_vector = await self.embeddings.embed_query(request.query)
-        candidate_limit = max(request.limit * 4, 20)
+        fused_limit = request.offset + request.limit + 1
+        candidate_limit = max(fused_limit * 4, 20)
         derived_points, raw_points = await asyncio.gather(
             self._query_projection(
                 vector=query_vector,
@@ -602,17 +603,22 @@ class SemanticSearchService:
                 (ProjectionKind.DERIVED_TEXT, 2.0, derived_points),
                 (ProjectionKind.RAW_MULTIMODAL, 1.0, raw_points),
             ],
-            limit=request.limit,
+            limit=fused_limit,
         )
-        item_ids = [item_id for item_id, _, _ in fused]
+        page = fused[request.offset : request.offset + request.limit]
+        has_more = len(fused) > request.offset + request.limit
+        item_ids = [item_id for item_id, _, _ in page]
         items = await self.corpus_item_repo.list_by_ids(item_ids)
         item_map = {item.id: item for item in items}
         return ArchiveSearchResponse(
             items=[
                 self._build_search_item(item_map[item_id], score=score, matched_projection_kinds=matched_projection_kinds)
-                for item_id, score, matched_projection_kinds in fused
+                for item_id, score, matched_projection_kinds in page
                 if item_id in item_map
-            ]
+            ],
+            limit=request.limit,
+            offset=request.offset,
+            has_more=has_more,
         )
 
     async def similar(self, corpus_item_id: UUID | str, limit: int) -> ArchiveSearchResponse:
@@ -658,7 +664,10 @@ class SemanticSearchService:
                 self._build_search_item(item_map[item_id], score=score, matched_projection_kinds=matched_projection_kinds)
                 for item_id, score, matched_projection_kinds in fused
                 if item_id in item_map
-            ]
+            ],
+            limit=limit,
+            offset=0,
+            has_more=False,
         )
 
     async def get_item(self, corpus_item_id: UUID | str) -> ArchiveSearchResultItem:

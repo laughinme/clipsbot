@@ -201,7 +201,8 @@ async def search_archive(
     media_storage: Annotated[MediaStorageService, Depends(get_media_storage_service)],
 ):
     query_vector = await embeddings.embed_query(payload.query)
-    candidate_limit = max(payload.limit * 4, 20)
+    fused_limit = payload.offset + payload.limit + 1
+    candidate_limit = max(fused_limit * 4, 20)
     derived_points, raw_points = await asyncio.gather(
         _query_projection(
             qdrant=qdrant,
@@ -224,8 +225,10 @@ async def search_archive(
             (ProjectionKind.DERIVED_TEXT, 2.0, derived_points),
             (ProjectionKind.RAW_MULTIMODAL, 1.0, raw_points),
         ],
-        limit=payload.limit,
+        limit=fused_limit,
     )
+    page = fused[payload.offset : payload.offset + payload.limit]
+    has_more = len(fused) > payload.offset + payload.limit
     return ArchiveSearchResponse(
         items=[
             _build_search_item(
@@ -234,8 +237,11 @@ async def search_archive(
                 matched_projection_kinds=matched_projection_kinds,
                 media_storage=media_storage,
             )
-            for result_payload, score, matched_projection_kinds in fused
-        ]
+            for result_payload, score, matched_projection_kinds in page
+        ],
+        limit=payload.limit,
+        offset=payload.offset,
+        has_more=has_more,
     )
 
 
