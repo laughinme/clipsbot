@@ -20,12 +20,12 @@ router = APIRouter()
 async def set_roles(
     payload: UserRolesUpdate,
     user_id: Annotated[UUID, Path(...)],
-    _: Annotated[User, Depends(require('admin'))],
+    current_user: Annotated[User, Depends(require('admin'))],
     svc: Annotated[UserService, Depends(get_user_service)],
 ):
     target = await svc.get_user(user_id)
     if target is None:
         raise UserNotFoundError()
 
-    updated = await svc.admin_assign_roles(target, payload.roles)
+    updated = await svc.admin_assign_roles(current_user, target, payload.roles)
     return updated

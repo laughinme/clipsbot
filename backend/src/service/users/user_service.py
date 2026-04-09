@@ -22,6 +22,7 @@ from .exceptions import (
     InvalidAvatarObjectKeyError,
     InvalidCursorError,
     ProtectedAdminRoleError,
+    SeededAdminOnlyRoleManagementError,
     UnknownRolesError,
     UnsupportedAvatarContentTypeError,
 )
@@ -195,11 +196,21 @@ class UserService:
     ):
         return await self.role_repo.list_roles(search=search, limit=limit)
 
+    def is_seeded_admin(self, user: User) -> bool:
+        return (
+            user.telegram_id is not None
+            and int(user.telegram_id) in self.settings.bootstrap_admin_telegram_ids
+        )
+
     async def admin_assign_roles(
         self,
+        actor: User,
         target: User,
         role_slugs: list[str],
     ) -> User:
+        if not self.is_seeded_admin(actor):
+            raise SeededAdminOnlyRoleManagementError()
+
         unique_slugs = list(dict.fromkeys(role_slugs))
         if (
             target.telegram_id is not None

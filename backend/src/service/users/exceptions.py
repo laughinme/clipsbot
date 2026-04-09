@@ -1,4 +1,4 @@
-from core.errors import BadRequestError, NotFoundError, PayloadTooLargeError, UnauthorizedError
+from core.errors import BadRequestError, ForbiddenError, NotFoundError, PayloadTooLargeError, UnauthorizedError
 
 
 class NotAuthenticated(UnauthorizedError):
@@ -57,3 +57,8 @@ class UserNotFoundError(NotFoundError):
 class ProtectedAdminRoleError(BadRequestError):
     error_code = "PROTECTED_ADMIN_ROLE"
     default_detail = "Bootstrap admins must keep the admin role"
+
+
+class SeededAdminOnlyRoleManagementError(ForbiddenError):
+    error_code = "SEEDED_ADMIN_ONLY_ROLE_MANAGEMENT"
+    default_detail = "Only seeded bootstrap admins can grant or revoke roles"
