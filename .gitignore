@@ -189,6 +189,7 @@ test.py
 nginx/certs/
 backend/.qdrant-restored/
 backups/
+archive-state/
 
 # Allow tracked frontend shared utilities
 !frontend/src/shared/lib/
